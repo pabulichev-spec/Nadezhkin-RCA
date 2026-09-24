@@ -87,6 +87,14 @@ const config: ExpoConfig = {
   plugins: [
     "expo-router",
     [
+      "expo-image-picker",
+      {
+        photosPermission: "Разрешите PumpRCA использовать фото для расследования отказов.",
+        cameraPermission: "Разрешите PumpRCA использовать камеру для фиксации оборудования.",
+      },
+    ],
+    "expo-document-picker",
+    [
       "expo-audio",
       {
         microphonePermission: "Allow $(PRODUCT_NAME) to access your microphone.",
