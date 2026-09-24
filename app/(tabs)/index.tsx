@@ -3,6 +3,8 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
 import * as VideoThumbnails from "expo-video-thumbnails";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -22,9 +24,11 @@ import {
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 
 import { ScreenContainer } from "@/components/screen-container";
+import { PhotoAnnotationEditor } from "@/components/photo-annotation-editor";
 import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
-import { getConfidenceBand } from "@/shared/rca";
+import { getConfidenceBand, matchesCaseFilters, type PhotoAnnotation } from "@/shared/rca";
+import { buildRcaReportHtml } from "@/shared/report";
 
 const STORAGE_KEY = "pumprca.cases.v1";
 
@@ -38,6 +42,7 @@ type Evidence = {
   uri?: string;
   mimeType?: string;
   note?: string;
+  annotations?: PhotoAnnotation[];
   createdAt: string;
 };
 
@@ -63,6 +68,7 @@ type PumpCase = {
   status: "В работе" | "Готово";
   narrative: string;
   evidence: Evidence[];
+  tags: string[];
   result?: RcaResult;
   updatedAt: string;
 };
@@ -81,6 +87,7 @@ const demoCases: PumpCase[] = [
       { id: "e-1", kind: "photo", name: "подшипник_01.jpg", note: "Следы перегрева на наружном кольце", createdAt: "2026-09-22" },
       { id: "e-2", kind: "text", name: "Журнал смены", note: "Вибрация 8.4 мм/с, рост за 3 часа", createdAt: "2026-09-22" },
     ],
+    tags: ["вибрация", "подшипник", "центровка"],
     result: {
       executiveSummary: "Наиболее вероятна комбинация разцентровки после смены агрегата и недостаточного контроля состояния муфты. Разрушение подшипника является следствием, а не первопричиной.",
       eventChain: ["Замена/запуск резервного агрегата", "Разцентровка муфты", "Рост радиальной вибрации", "Перегрев подшипника", "Останов насоса"],
@@ -111,6 +118,7 @@ const demoCases: PumpCase[] = [
       { id: "e-3", kind: "video", name: "осмотр_Н17.mp4", createdAt: "Сегодня" },
       { id: "e-4", kind: "text", name: "Показания оператора", note: "Давление всасывания нестабильно", createdAt: "Сегодня" },
     ],
+    tags: ["подача", "всасывание", "шлам"],
     updatedAt: "Сегодня, 09:12",
   },
 ];
@@ -160,9 +168,16 @@ export default function HomeScreen() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState({ title: "", equipmentType: "Центробежный насос", assetTag: "", location: "", narrative: "" });
   const [draftEvidence, setDraftEvidence] = useState<Evidence[]>([]);
+  const [draftTags, setDraftTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState("");
   const [textEvidence, setTextEvidence] = useState("");
   const [isPreparing, setIsPreparing] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [annotationTarget, setAnnotationTarget] = useState<Evidence | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeTag, setActiveTag] = useState("Все");
+  const [activeStatus, setActiveStatus] = useState("Все");
 
   const selectedCase = cases.find((item) => item.id === selectedId) ?? cases[0];
   const rcaMutation = trpc.rca.analyze.useMutation();
@@ -173,8 +188,9 @@ export default function HomeScreen() {
         try {
           const parsed = JSON.parse(raw) as PumpCase[];
           if (parsed.length > 0) {
-            setCases(parsed);
-            setSelectedId(parsed[0].id);
+            const normalized = parsed.map((item) => ({ ...item, tags: item.tags?.length ? item.tags : item.id === "demo-1" ? ["вибрация", "подшипник", "центровка"] : item.id === "demo-2" ? ["подача", "всасывание", "шлам"] : [], evidence: item.evidence.map((entry) => ({ ...entry, annotations: entry.annotations ?? [] })) }));
+            setCases(normalized);
+            setSelectedId(normalized[0].id);
           }
         } catch {
           // Keep the curated starter cases when local storage is invalid.
@@ -190,6 +206,8 @@ export default function HomeScreen() {
 
   const completedCount = useMemo(() => cases.filter((item) => item.status === "Готово").length, [cases]);
   const openCount = cases.length - completedCount;
+  const allTags = useMemo(() => ["Все", ...Array.from(new Set(cases.flatMap((item) => item.tags ?? []))).sort()], [cases]);
+  const filteredCases = useMemo(() => cases.filter((item) => matchesCaseFilters(item, searchQuery, activeTag, activeStatus)), [activeStatus, activeTag, cases, searchQuery]);
 
   const updateCase = (next: PumpCase) => setCases((current) => current.map((item) => item.id === next.id ? next : item));
 
@@ -239,10 +257,34 @@ export default function HomeScreen() {
     setTextEvidence("");
   };
 
+  const addDraftTag = () => {
+    const nextTag = tagInput.trim().toLowerCase().replace(/\s+/g, "-");
+    if (!nextTag || draftTags.includes(nextTag)) {
+      setTagInput("");
+      return;
+    }
+    setDraftTags((current) => [...current, nextTag]);
+    setTagInput("");
+  };
+
+  const savePhotoAnnotations = (annotations: PhotoAnnotation[]) => {
+    if (!annotationTarget) return;
+    setDraftEvidence((current) => current.map((entry) => entry.id === annotationTarget.id ? { ...entry, annotations } : entry));
+    if (editingId) {
+      const existing = cases.find((item) => item.id === editingId);
+      if (existing) {
+        updateCase({ ...existing, evidence: existing.evidence.map((entry) => entry.id === annotationTarget.id ? { ...entry, annotations } : entry), status: "В работе", result: undefined, updatedAt: formatNow() });
+      }
+    }
+    setAnnotationTarget(null);
+  };
+
   const openNewCase = () => {
     setEditingId(null);
     setDraft({ title: "", equipmentType: "Центробежный насос", assetTag: "", location: "", narrative: "" });
     setDraftEvidence([]);
+    setDraftTags([]);
+    setTagInput("");
     setTextEvidence("");
     setShowNewCase(true);
   };
@@ -251,6 +293,8 @@ export default function HomeScreen() {
     setEditingId(item.id);
     setDraft({ title: item.title, equipmentType: item.equipmentType, assetTag: item.assetTag, location: item.location, narrative: item.narrative });
     setDraftEvidence(item.evidence);
+    setDraftTags(item.tags ?? []);
+    setTagInput("");
     setTextEvidence("");
     setShowNewCase(true);
   };
@@ -260,11 +304,11 @@ export default function HomeScreen() {
       Alert.alert("Укажите название", "Например: «Разрушение торцевого уплотнения Н-12».");
       return;
     }
-    const newCase: PumpCase = { id: makeId("case"), title: draft.title.trim(), equipmentType: draft.equipmentType, assetTag: draft.assetTag.trim() || "Не указан", location: draft.location.trim() || "Не указано", severity: "Высокий", status: "В работе", narrative: draft.narrative.trim() || "Описание события пока не добавлено.", evidence: draftEvidence, updatedAt: formatNow() };
+    const newCase: PumpCase = { id: makeId("case"), title: draft.title.trim(), equipmentType: draft.equipmentType, assetTag: draft.assetTag.trim() || "Не указан", location: draft.location.trim() || "Не указано", severity: "Высокий", status: "В работе", narrative: draft.narrative.trim() || "Описание события пока не добавлено.", evidence: draftEvidence, tags: draftTags, updatedAt: formatNow() };
     if (editingId) {
       const existing = cases.find((item) => item.id === editingId);
       if (existing) {
-        updateCase({ ...existing, title: newCase.title, equipmentType: newCase.equipmentType, assetTag: newCase.assetTag, location: newCase.location, narrative: newCase.narrative, evidence: newCase.evidence, status: "В работе", result: undefined, updatedAt: newCase.updatedAt });
+        updateCase({ ...existing, title: newCase.title, equipmentType: newCase.equipmentType, assetTag: newCase.assetTag, location: newCase.location, narrative: newCase.narrative, evidence: newCase.evidence, tags: newCase.tags, status: "В работе", result: undefined, updatedAt: newCase.updatedAt });
         setSelectedId(existing.id);
       }
     } else {
@@ -275,6 +319,8 @@ export default function HomeScreen() {
     setEditingId(null);
     setDraft({ title: "", equipmentType: "Центробежный насос", assetTag: "", location: "", narrative: "" });
     setDraftEvidence([]);
+    setDraftTags([]);
+    setTagInput("");
     setTextEvidence("");
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
   };
@@ -293,7 +339,8 @@ export default function HomeScreen() {
             imageData = undefined;
           }
         }
-        return { kind: entry.kind, name: entry.name, note: entry.note, imageData };
+        const annotationNote = entry.annotations?.length ? `Маркеры на фото: ${entry.annotations.map((annotation) => annotation.text).join("; ")}` : "";
+        return { kind: entry.kind, name: entry.name, note: [entry.note, annotationNote].filter(Boolean).join(". "), imageData };
       }));
       const result = await rcaMutation.mutateAsync({ caseTitle: item.title, equipmentType: item.equipmentType, assetTag: item.assetTag, location: item.location, narrative: item.narrative, evidence: payloadEvidence });
       updateCase({ ...item, result, status: "Готово", updatedAt: formatNow() });
@@ -303,6 +350,38 @@ export default function HomeScreen() {
       Alert.alert("Анализ не завершён", "Сервер анализа временно недоступен. Данные расследования сохранены на устройстве.");
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const exportRcaReport = async (item: PumpCase) => {
+    if (!item.result) {
+      Alert.alert("Сначала сформируйте RCA", "Итоговый PDF появится после завершения анализа выбранного кейса.");
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const evidence = await Promise.all(item.evidence.map(async (entry) => ({
+        kind: entry.kind,
+        name: entry.name,
+        note: entry.note,
+        annotations: entry.annotations,
+        imageData: entry.kind === "photo" && entry.uri ? await toDataUrl(entry.uri, entry.mimeType) : undefined,
+      })));
+      const html = buildRcaReportHtml({ ...item, evidence }, formatNow());
+      if (Platform.OS === "web") {
+        await Print.printAsync({ html });
+        return;
+      }
+      const { uri } = await Print.printToFileAsync({ html });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: "application/pdf", UTI: ".pdf", dialogTitle: "Экспорт RCA-отчёта" });
+      } else {
+        Alert.alert("PDF создан", `Файл отчёта сохранён: ${uri}`);
+      }
+    } catch {
+      Alert.alert("Не удалось экспортировать PDF", "Попробуйте ещё раз после формирования RCA-вывода.");
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -327,15 +406,22 @@ export default function HomeScreen() {
           <View style={[styles.kpiCard, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.kpiNumber, { color: colors.success }]}>{completedCount}</Text><Text style={[styles.kpiLabel, { color: colors.muted }]}>с выводом</Text></View>
         </View>
 
-        <View style={styles.sectionHeader}><View><Text style={[styles.sectionTitle, { color: colors.foreground }]}>Мои расследования</Text><Text style={[styles.sectionSubtitle, { color: colors.muted }]}>Свидетельства → гипотезы → корневая причина</Text></View><Pressable onPress={openNewCase} style={({ pressed }) => [styles.addCircle, { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 }]}><Icon name="add" size={24} color="#FFFFFF" /></Pressable></View>
+        <View style={[styles.filterPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          <View style={[styles.searchBox, { borderColor: colors.border }]}><Icon name="search" size={19} color={colors.muted} /><TextInput value={searchQuery} onChangeText={setSearchQuery} placeholder="Поиск по кейсам, активам и тегам" placeholderTextColor={colors.muted} style={[styles.searchInput, { color: colors.foreground }]} /></View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>{allTags.map((tag) => <FilterChip key={tag} label={tag} active={activeTag === tag} onPress={() => setActiveTag(tag)} colors={colors} />)}</ScrollView>
+          <View style={styles.statusFilters}><Text style={[styles.filterLabel, { color: colors.muted }]}>Статус</Text><FilterChip label="Все" active={activeStatus === "Все"} onPress={() => setActiveStatus("Все")} colors={colors} /><FilterChip label="В работе" active={activeStatus === "В работе"} onPress={() => setActiveStatus("В работе")} colors={colors} /><FilterChip label="Готово" active={activeStatus === "Готово"} onPress={() => setActiveStatus("Готово")} colors={colors} /></View>
+        </View>
+
+        <View style={styles.sectionHeader}><View><Text style={[styles.sectionTitle, { color: colors.foreground }]}>Мои расследования</Text><Text style={[styles.sectionSubtitle, { color: colors.muted }]}>{filteredCases.length} из {cases.length} · свидетельства → RCA</Text></View><Pressable onPress={openNewCase} style={({ pressed }) => [styles.addCircle, { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 }]}><Icon name="add" size={24} color="#FFFFFF" /></Pressable></View>
 
         <FlatList
-          data={cases}
+          data={filteredCases}
           keyExtractor={(item) => item.id}
           scrollEnabled={false}
+          ListEmptyComponent={<View style={[styles.noResults, { backgroundColor: colors.surface, borderColor: colors.border }]}><Icon name="filter-alt-off" size={22} color={colors.muted} /><Text style={[styles.noResultsText, { color: colors.muted }]}>По заданным фильтрам кейсы не найдены.</Text></View>}
           renderItem={({ item }) => (
             <Pressable onPress={() => setSelectedId(item.id)} style={({ pressed }) => [styles.caseCard, { backgroundColor: colors.surface, borderColor: item.id === selectedId ? colors.primary : colors.border, opacity: pressed ? 0.86 : 1 }]}>
-              <View style={styles.caseTopLine}><View style={styles.caseIcon}><Icon name={item.equipmentType.includes("Шлам") ? "water" : "settings"} size={19} color={colors.primary} /></View><View style={styles.caseHeading}><Text numberOfLines={1} style={[styles.caseTitle, { color: colors.foreground }]}>{item.title}</Text><Text style={[styles.caseMeta, { color: colors.muted }]}>{item.assetTag} · {item.location}</Text></View><Icon name="chevron-right" size={21} color={colors.muted} /></View>
+              <View style={styles.caseTopLine}><View style={styles.caseIcon}><Icon name={item.equipmentType.includes("Шлам") ? "water" : "settings"} size={19} color={colors.primary} /></View><View style={styles.caseHeading}><Text numberOfLines={1} style={[styles.caseTitle, { color: colors.foreground }]}>{item.title}</Text><Text style={[styles.caseMeta, { color: colors.muted }]}>{item.assetTag} · {item.location}</Text><View style={styles.tagRow}>{(item.tags ?? []).slice(0, 3).map((tag) => <View key={tag} style={styles.miniTag}><Text style={[styles.miniTagText, { color: colors.primary }]}>#{tag}</Text></View>)}</View></View><Icon name="chevron-right" size={21} color={colors.muted} /></View>
               <View style={styles.caseBottomLine}><Pill background={item.status === "Готово" ? "#E5F5EF" : "#FFF3DD"} color={item.status === "Готово" ? "#16805D" : "#A56600"}>{item.status}</Pill><Text style={[styles.updatedText, { color: colors.muted }]}>{item.updatedAt}</Text><Text style={[styles.evidenceCount, { color: colors.foreground }]}><Icon name="attach-file" size={15} color={colors.muted} /> {item.evidence.length}</Text></View>
             </Pressable>
           )}
@@ -349,9 +435,9 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.sectionHeader}><View><Text style={[styles.sectionTitle, { color: colors.foreground }]}>Материалы расследования</Text><Text style={[styles.sectionSubtitle, { color: colors.muted }]}>{selectedCase.evidence.length} источника в кейсе</Text></View><Icon name="folder-open" size={22} color={colors.muted} /></View>
-        <View style={styles.evidenceList}>{selectedCase.evidence.map((item) => <View key={item.id} style={[styles.evidenceRow, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={[styles.evidenceIcon, { backgroundColor: item.kind === "photo" ? "#E7F0FF" : item.kind === "video" ? "#F2E9FF" : "#E5F5EF" }]}><Icon name={item.kind === "photo" ? "image" : item.kind === "video" ? "videocam" : item.kind === "file" ? "description" : "notes"} size={20} color={item.kind === "photo" ? "#3867D6" : item.kind === "video" ? "#8656C7" : "#16805D"} /></View><View style={{ flex: 1 }}><Text style={[styles.evidenceName, { color: colors.foreground }]}>{item.name}</Text><Text numberOfLines={1} style={[styles.evidenceNote, { color: colors.muted }]}>{item.note ?? (item.kind === "video" ? "Видеосвидетельство · будет взят кадр для AI-анализа" : "Добавлено в материалы кейса")}</Text></View><Icon name="check-circle" size={19} color={colors.success} /></View>)}</View>
+        <View style={styles.evidenceList}>{selectedCase.evidence.map((item) => <View key={item.id} style={[styles.evidenceRow, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={[styles.evidenceIcon, { backgroundColor: item.kind === "photo" ? "#E7F0FF" : item.kind === "video" ? "#F2E9FF" : "#E5F5EF" }]}><Icon name={item.kind === "photo" ? "image" : item.kind === "video" ? "videocam" : item.kind === "file" ? "description" : "notes"} size={20} color={item.kind === "photo" ? "#3867D6" : item.kind === "video" ? "#8656C7" : "#16805D"} /></View><View style={{ flex: 1 }}><Text style={[styles.evidenceName, { color: colors.foreground }]}>{item.name}</Text><Text numberOfLines={1} style={[styles.evidenceNote, { color: colors.muted }]}>{item.note ?? (item.kind === "video" ? "Видеосвидетельство · будет взят кадр для AI-анализа" : item.annotations?.length ? `${item.annotations.length} маркеров повреждений` : "Добавлено в материалы кейса")}</Text></View>{item.kind === "photo" && <Pressable onPress={() => { setEditingId(selectedCase.id); setDraftEvidence(selectedCase.evidence); setAnnotationTarget(item); }} style={styles.annotateSmall}><Icon name="edit" size={16} color={colors.primary} /></Pressable>}<Icon name="check-circle" size={19} color={colors.success} /></View>)}</View>
 
-        {selectedCase.result ? <RcaSummary result={selectedCase.result} colors={colors} /> : <View style={[styles.emptyRca, { backgroundColor: "#FFF8F3", borderColor: "#F6D6C8" }]}><View style={styles.emptyRcaIcon}><Icon name="auto-awesome" size={24} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.emptyRcaTitle, { color: colors.foreground }]}>RCA-вывод ещё не сформирован</Text><Text style={[styles.emptyRcaText, { color: colors.muted }]}>Добавьте факты, фотографии и видео. AI соберёт цепочку событий, разделит причины и покажет, чего не хватает для уверенного вывода.</Text></View></View>}
+        {selectedCase.result ? <RcaSummary result={selectedCase.result} colors={colors} onExport={() => exportRcaReport(selectedCase)} isExporting={isExporting} /> : <View style={[styles.emptyRca, { backgroundColor: "#FFF8F3", borderColor: "#F6D6C8" }]}><View style={styles.emptyRcaIcon}><Icon name="auto-awesome" size={24} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.emptyRcaTitle, { color: colors.foreground }]}>RCA-вывод ещё не сформирован</Text><Text style={[styles.emptyRcaText, { color: colors.muted }]}>Добавьте факты, фотографии и видео. AI соберёт цепочку событий, разделит причины и покажет, чего не хватает для уверенного вывода.</Text></View></View>}
       </ScrollView>
 
       <Modal visible={showNewCase} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowNewCase(false)}>
@@ -362,14 +448,17 @@ export default function HomeScreen() {
             <Text style={[styles.inputLabel, { color: colors.foreground }]}>Тип оборудования</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}><EquipmentChip label="Центробежный насос" active={draft.equipmentType === "Центробежный насос"} onPress={() => setDraft((current) => ({ ...current, equipmentType: "Центробежный насос" }))} colors={colors} /><EquipmentChip label="Шламовый насос" active={draft.equipmentType === "Шламовый насос"} onPress={() => setDraft((current) => ({ ...current, equipmentType: "Шламовый насос" }))} colors={colors} /><EquipmentChip label="Дозировочный" active={draft.equipmentType === "Дозировочный"} onPress={() => setDraft((current) => ({ ...current, equipmentType: "Дозировочный" }))} colors={colors} /></ScrollView>
             <View style={styles.twoInputs}><View style={{ flex: 1 }}><Text style={[styles.inputLabel, { color: colors.foreground }]}>Тег актива</Text><TextInput value={draft.assetTag} onChangeText={(value) => setDraft((current) => ({ ...current, assetTag: value }))} placeholder="P-204" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} /></View><View style={{ flex: 1 }}><Text style={[styles.inputLabel, { color: colors.foreground }]}>Локация</Text><TextInput value={draft.location} onChangeText={(value) => setDraft((current) => ({ ...current, location: value }))} placeholder="Цех 2" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} /></View></View>
             <Text style={[styles.inputLabel, { color: colors.foreground }]}>Что произошло?</Text><TextInput value={draft.narrative} onChangeText={(value) => setDraft((current) => ({ ...current, narrative: value }))} placeholder="Опишите события, симптомы и действия оператора…" placeholderTextColor={colors.muted} multiline numberOfLines={5} textAlignVertical="top" style={[styles.input, styles.textarea, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} />
+            <Text style={[styles.inputLabel, { color: colors.foreground }]}>Теги кейса</Text><View style={styles.textEvidenceRow}><TextInput value={tagInput} onChangeText={setTagInput} onSubmitEditing={addDraftTag} placeholder="например: вибрация" placeholderTextColor={colors.muted} style={[styles.input, { flex: 1, backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} returnKeyType="done" /><Pressable onPress={addDraftTag} style={({ pressed }) => [styles.sendButton, { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 }]}><Icon name="add" size={20} color="#FFFFFF" /></Pressable></View>
+            {draftTags.length > 0 && <View style={styles.tagInputList}>{draftTags.map((tag) => <Pressable key={tag} onPress={() => setDraftTags((current) => current.filter((entry) => entry !== tag))} style={[styles.formTag, { backgroundColor: "#FFF0EC" }]}><Text style={[styles.formTagText, { color: colors.primary }]}>#{tag}</Text><Icon name="close" size={13} color={colors.primary} /></Pressable>)}</View>}
             <Text style={[styles.inputLabel, { color: colors.foreground }]}>Свидетельства</Text><View style={styles.evidenceButtons}><EvidenceButton label="Фото" icon="photo-camera" onPress={() => pickMedia("camera")} colors={colors} /><EvidenceButton label="Галерея" icon="photo-library" onPress={() => pickMedia("gallery")} colors={colors} /><EvidenceButton label="Видео" icon="videocam" onPress={() => pickMedia("video")} colors={colors} /><EvidenceButton label="Файл" icon="attach-file" onPress={pickFile} colors={colors} /></View>
             <View style={styles.textEvidenceRow}><TextInput value={textEvidence} onChangeText={setTextEvidence} placeholder="Добавить показание, замер или факт…" placeholderTextColor={colors.muted} style={[styles.input, { flex: 1, backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} /><Pressable onPress={addTextEvidence} style={({ pressed }) => [styles.sendButton, { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 }]}><Icon name="arrow-upward" size={20} color="#FFFFFF" /></Pressable></View>
             {isPreparing && <View style={styles.loadingRow}><ActivityIndicator color={colors.primary} /><Text style={[styles.loadingText, { color: colors.muted }]}>Подготавливаю материалы…</Text></View>}
-            {draftEvidence.length > 0 && <View style={styles.draftList}>{draftEvidence.map((item) => <View key={item.id} style={[styles.draftRow, { backgroundColor: colors.surface, borderColor: colors.border }]}><Icon name={item.kind === "photo" ? "image" : item.kind === "video" ? "videocam" : item.kind === "file" ? "description" : "notes"} size={18} color={colors.primary} /><Text numberOfLines={1} style={[styles.draftName, { color: colors.foreground }]}>{item.name}</Text><Pressable onPress={() => setDraftEvidence((current) => current.filter((entry) => entry.id !== item.id))}><Icon name="remove-circle-outline" size={18} color={colors.muted} /></Pressable></View>)}</View>}
+            {draftEvidence.length > 0 && <View style={styles.draftList}>{draftEvidence.map((item) => <View key={item.id} style={[styles.draftRow, { backgroundColor: colors.surface, borderColor: colors.border }]}><Icon name={item.kind === "photo" ? "image" : item.kind === "video" ? "videocam" : item.kind === "file" ? "description" : "notes"} size={18} color={colors.primary} /><Text numberOfLines={1} style={[styles.draftName, { color: colors.foreground }]}>{item.name}</Text>{item.kind === "photo" && <Pressable onPress={() => setAnnotationTarget(item)} style={styles.annotateDraft}><Icon name="edit" size={17} color={colors.primary} /></Pressable>}<Pressable onPress={() => setDraftEvidence((current) => current.filter((entry) => entry.id !== item.id))}><Icon name="remove-circle-outline" size={18} color={colors.muted} /></Pressable></View>)}</View>}
             <Pressable onPress={createCase} style={({ pressed }) => [styles.createButton, { backgroundColor: colors.primary, opacity: pressed ? 0.86 : 1 }]}><Icon name="add-task" size={20} color="#FFFFFF" /><Text style={styles.createButtonText}>{editingId ? "Сохранить материалы" : "Сохранить расследование"}</Text></Pressable>
           </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
+      <PhotoAnnotationEditor visible={Boolean(annotationTarget)} uri={annotationTarget?.uri} fileName={annotationTarget?.name ?? "Фото"} annotations={annotationTarget?.annotations ?? []} onSave={savePhotoAnnotations} onClose={() => setAnnotationTarget(null)} />
     </ScreenContainer>
   );
 }
@@ -378,14 +467,18 @@ function EquipmentChip({ label, active, onPress, colors }: { label: string; acti
   return <Pressable onPress={onPress} style={({ pressed }) => [styles.chip, { backgroundColor: active ? colors.primary : colors.surface, borderColor: active ? colors.primary : colors.border, opacity: pressed ? 0.8 : 1 }]}><Text style={[styles.chipText, { color: active ? "#FFFFFF" : colors.foreground }]}>{label}</Text></Pressable>;
 }
 
+function FilterChip({ label, active, onPress, colors }: { label: string; active: boolean; onPress: () => void; colors: ReturnType<typeof useColors> }) {
+  return <Pressable onPress={onPress} style={({ pressed }) => [styles.filterChip, { backgroundColor: active ? "#FFF0EC" : colors.background, borderColor: active ? colors.primary : colors.border, opacity: pressed ? 0.78 : 1 }]}><Text style={[styles.filterChipText, { color: active ? colors.primary : colors.muted }]}>{label}</Text></Pressable>;
+}
+
 function EvidenceButton({ label, icon, onPress, colors }: { label: string; icon: React.ComponentProps<typeof MaterialIcons>["name"]; onPress: () => void; colors: ReturnType<typeof useColors> }) {
   return <Pressable onPress={onPress} style={({ pressed }) => [styles.evidenceButton, { backgroundColor: colors.surface, borderColor: colors.border, opacity: pressed ? 0.75 : 1 }]}><Icon name={icon} size={20} color={colors.primary} /><Text style={[styles.evidenceButtonText, { color: colors.foreground }]}>{label}</Text></Pressable>;
 }
 
-function RcaSummary({ result, colors }: { result: RcaResult; colors: ReturnType<typeof useColors> }) {
+function RcaSummary({ result, colors, onExport, isExporting }: { result: RcaResult; colors: ReturnType<typeof useColors>; onExport: () => void; isExporting: boolean }) {
   const confidenceBand = getConfidenceBand(result.confidence);
   const confidenceLabel = confidenceBand === "high" ? "высокая" : confidenceBand === "medium" ? "средняя" : "низкая";
-  return <View style={[styles.rcaCard, { backgroundColor: colors.foreground }]}><View style={styles.rcaHeader}><View><Text style={styles.rcaEyebrow}>AI RCA / ВЫВОДЫ</Text><Text style={styles.rcaTitle}>Гипотеза корневой причины</Text></View><View style={styles.confidence}><Text style={styles.confidenceNumber}>{result.confidence}%</Text><Text style={styles.confidenceLabel}>{confidenceLabel} уверенность</Text></View></View><Text style={styles.rcaSummaryText}>{result.executiveSummary}</Text><View style={styles.rootCauseBlock}><Text style={styles.rootCauseLabel}>ROOT CAUSE</Text><Text style={styles.rootCauseText}>{result.rootCause}</Text></View><View style={styles.timeline}>{result.eventChain.slice(0, 5).map((event, index) => <View key={`${event}-${index}`} style={styles.timelineRow}><View style={styles.timelineDot}><Text style={styles.timelineIndex}>{index + 1}</Text></View><Text style={styles.timelineText}>{event}</Text></View>)}</View><Text style={styles.subsectionLabel}>Следующие действия</Text>{result.recommendations.slice(0, 3).map((recommendation) => <View key={recommendation.action} style={styles.recommendation}><View style={styles.recommendationBadge}><Text style={styles.recommendationBadgeText}>{recommendation.priority}</Text></View><View style={{ flex: 1 }}><Text style={styles.recommendationAction}>{recommendation.action}</Text><Text style={styles.recommendationMeta}>{recommendation.owner} · {recommendation.horizon}</Text></View></View>)}<View style={styles.openQuestions}><Icon name="help-outline" size={19} color="#F7B08E" /><Text style={styles.openQuestionsText}>{result.openQuestions.length} открытых вопроса требуют проверки на месте</Text></View></View>;
+  return <View style={[styles.rcaCard, { backgroundColor: colors.foreground }]}><View style={styles.rcaHeader}><View><Text style={styles.rcaEyebrow}>AI RCA / ВЫВОДЫ</Text><Text style={styles.rcaTitle}>Гипотеза корневой причины</Text></View><View style={styles.confidence}><Text style={styles.confidenceNumber}>{result.confidence}%</Text><Text style={styles.confidenceLabel}>{confidenceLabel} уверенность</Text></View></View><Text style={styles.rcaSummaryText}>{result.executiveSummary}</Text><View style={styles.rootCauseBlock}><Text style={styles.rootCauseLabel}>ROOT CAUSE</Text><Text style={styles.rootCauseText}>{result.rootCause}</Text></View><View style={styles.timeline}>{result.eventChain.slice(0, 5).map((event, index) => <View key={`${event}-${index}`} style={styles.timelineRow}><View style={styles.timelineDot}><Text style={styles.timelineIndex}>{index + 1}</Text></View><Text style={styles.timelineText}>{event}</Text></View>)}</View><Text style={styles.subsectionLabel}>Следующие действия</Text>{result.recommendations.slice(0, 3).map((recommendation) => <View key={recommendation.action} style={styles.recommendation}><View style={styles.recommendationBadge}><Text style={styles.recommendationBadgeText}>{recommendation.priority}</Text></View><View style={{ flex: 1 }}><Text style={styles.recommendationAction}>{recommendation.action}</Text><Text style={styles.recommendationMeta}>{recommendation.owner} · {recommendation.horizon}</Text></View></View>)}<View style={styles.openQuestions}><Icon name="help-outline" size={19} color="#F7B08E" /><Text style={styles.openQuestionsText}>{result.openQuestions.length} открытых вопроса требуют проверки на месте</Text></View><Pressable disabled={isExporting} onPress={onExport} style={({ pressed }) => [styles.pdfButton, { opacity: isExporting ? 0.55 : pressed ? 0.8 : 1 }]}><Icon name={isExporting ? "hourglass-top" : "picture-as-pdf"} size={18} color="#FFFFFF" /><Text style={styles.pdfButtonText}>{isExporting ? "Формирую PDF…" : "Экспортировать RCA в PDF"}</Text></Pressable></View>;
 }
 
 const styles = StyleSheet.create({
@@ -398,6 +491,14 @@ const styles = StyleSheet.create({
   kpiCard: { flex: 1, padding: 14, borderRadius: 16, borderWidth: 1 },
   kpiNumber: { fontSize: 24, fontWeight: "800", marginBottom: 2 },
   kpiLabel: { fontSize: 11, lineHeight: 15 },
+  filterPanel: { borderWidth: 1, borderRadius: 17, padding: 12, gap: 10 },
+  searchBox: { minHeight: 42, borderWidth: 1, borderRadius: 12, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, gap: 8 },
+  searchInput: { flex: 1, minHeight: 40, fontSize: 12 },
+  filterScroll: { gap: 7 },
+  statusFilters: { flexDirection: "row", alignItems: "center", gap: 7, flexWrap: "wrap" },
+  filterLabel: { fontSize: 11, fontWeight: "800", marginRight: 1 },
+  noResults: { borderWidth: 1, borderRadius: 16, minHeight: 80, alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 10 },
+  noResultsText: { fontSize: 12 },
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sectionTitle: { fontSize: 18, fontWeight: "800", letterSpacing: -0.2 },
   sectionSubtitle: { fontSize: 12, marginTop: 3 },
@@ -408,6 +509,9 @@ const styles = StyleSheet.create({
   caseHeading: { flex: 1 },
   caseTitle: { fontSize: 15, fontWeight: "800" },
   caseMeta: { fontSize: 11, marginTop: 4 },
+  tagRow: { flexDirection: "row", gap: 5, marginTop: 6, flexWrap: "wrap" },
+  miniTag: { backgroundColor: "#FFF0EC", borderRadius: 5, paddingHorizontal: 5, paddingVertical: 2 },
+  miniTagText: { fontSize: 9, fontWeight: "800" },
   caseBottomLine: { flexDirection: "row", alignItems: "center", marginTop: 14, gap: 10 },
   pill: { borderRadius: 20, paddingHorizontal: 9, paddingVertical: 5 },
   pillText: { fontSize: 10, fontWeight: "800" },
@@ -429,6 +533,7 @@ const styles = StyleSheet.create({
   evidenceIcon: { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   evidenceName: { fontSize: 13, fontWeight: "800" },
   evidenceNote: { fontSize: 11, marginTop: 3 },
+  annotateSmall: { width: 29, height: 29, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: "#FFF0EC" },
   emptyRca: { borderRadius: 18, borderWidth: 1, padding: 16, flexDirection: "row", gap: 13 },
   emptyRcaIcon: { width: 42, height: 42, borderRadius: 13, backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
   emptyRcaTitle: { fontSize: 14, fontWeight: "800", marginBottom: 5 },
@@ -457,6 +562,8 @@ const styles = StyleSheet.create({
   recommendationMeta: { color: "#AEBBC7", fontSize: 10, marginTop: 3 },
   openQuestions: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#405361", paddingTop: 14, flexDirection: "row", gap: 8, alignItems: "center" },
   openQuestionsText: { color: "#F7B08E", fontSize: 11, fontWeight: "700" },
+  pdfButton: { minHeight: 45, borderRadius: 12, backgroundColor: "#F2673A", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  pdfButtonText: { color: "#FFFFFF", fontSize: 12, fontWeight: "800" },
   modal: { flex: 1 },
   modalHeader: { padding: 20, paddingTop: Platform.OS === "ios" ? 18 : 26, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#E6E8EB" },
   modalEyebrow: { fontSize: 10, letterSpacing: 1.3, fontWeight: "800", marginBottom: 4 },
@@ -467,8 +574,13 @@ const styles = StyleSheet.create({
   input: { minHeight: 46, borderRadius: 13, borderWidth: 1, paddingHorizontal: 13, fontSize: 13 },
   textarea: { minHeight: 116, paddingTop: 13 },
   twoInputs: { flexDirection: "row", gap: 10 },
+  tagInputList: { flexDirection: "row", gap: 7, flexWrap: "wrap" },
+  formTag: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 4 },
+  formTagText: { fontSize: 11, fontWeight: "800" },
   chip: { borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 20 },
   chipText: { fontSize: 11, fontWeight: "700" },
+  filterChip: { borderWidth: 1, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 16 },
+  filterChipText: { fontSize: 10, fontWeight: "800" },
   evidenceButtons: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   evidenceButton: { borderWidth: 1, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 12, flexDirection: "row", gap: 6, alignItems: "center" },
   evidenceButtonText: { fontSize: 11, fontWeight: "800" },
@@ -479,6 +591,7 @@ const styles = StyleSheet.create({
   draftList: { gap: 7, marginTop: 3 },
   draftRow: { borderWidth: 1, borderRadius: 12, padding: 10, flexDirection: "row", alignItems: "center", gap: 9 },
   draftName: { flex: 1, fontSize: 12, fontWeight: "700" },
+  annotateDraft: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "#FFF0EC" },
   createButton: { minHeight: 51, borderRadius: 15, marginTop: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   createButtonText: { color: "#FFFFFF", fontSize: 14, fontWeight: "800" },
 });
