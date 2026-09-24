@@ -4,6 +4,7 @@ import { formatRcaEvidence, getConfidenceBand, hasActionableRca, matchesCaseFilt
 import { buildRcaChatPrompt } from "../shared/chat";
 import { buildRcaReportHtml } from "../shared/report";
 import { makeAiCacheKey, stableSerialize } from "../shared/ai";
+import { EQUIPMENT_TYPES, filterEquipmentTypes, isKnownEquipmentType } from "../shared/equipment";
 
 describe("RCA utilities", () => {
   it("maps confidence to an interpretable band", () => {
@@ -96,5 +97,13 @@ describe("RCA utilities", () => {
     expect(stableSerialize({ b: 2, a: 1 })).toBe(stableSerialize({ a: 1, b: 2 }));
     expect(makeAiCacheKey("rca", { b: 2, a: 1 })).toBe(makeAiCacheKey("rca", { a: 1, b: 2 }));
     expect(makeAiCacheKey("rca", { a: 1 })).not.toBe(makeAiCacheKey("chat", { a: 1 }));
+  });
+
+  it("searches the expanded equipment list and supports custom types", () => {
+    expect(EQUIPMENT_TYPES.length).toBeGreaterThanOrEqual(16);
+    expect(filterEquipmentTypes("пор")).toContain("Поршневой насос");
+    expect(filterEquipmentTypes("мембран")).toContain("Диафрагменный (мембранный) насос");
+    expect(isKnownEquipmentType("Погружной насос")).toBe(true);
+    expect(isKnownEquipmentType("Насос по проекту X")).toBe(false);
   });
 });

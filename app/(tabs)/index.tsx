@@ -34,6 +34,7 @@ import { getConfidenceBand, matchesCaseFilters, removeCaseById, type PhotoAnnota
 import { buildRcaReportHtml } from "@/shared/report";
 import type { RcaChatContext, RcaChatMessage } from "@/shared/chat";
 import { makeAiCacheKey } from "@/shared/ai";
+import { filterEquipmentTypes, isKnownEquipmentType } from "@/shared/equipment";
 import { readAiCache, readAiUsage, recordAiUsage, writeAiCache } from "@/lib/ai-cache";
 
 const STORAGE_KEY = "pumprca.cases.v1";
@@ -235,6 +236,8 @@ export default function HomeScreen() {
   const [draftEvidence, setDraftEvidence] = useState<Evidence[]>([]);
   const [draftTags, setDraftTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
+  const [equipmentSearch, setEquipmentSearch] = useState("");
+  const [customEquipment, setCustomEquipment] = useState("");
   const [textEvidence, setTextEvidence] = useState("");
   const [isPreparing, setIsPreparing] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -243,6 +246,7 @@ export default function HomeScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTag, setActiveTag] = useState("Все");
   const [activeStatus, setActiveStatus] = useState("Все");
+  const filteredEquipmentTypes = useMemo(() => filterEquipmentTypes(equipmentSearch), [equipmentSearch]);
 
   const selectedCase = cases.find((item) => item.id === selectedId) ?? cases[0];
   const rcaMutation = trpc.rca.analyze.useMutation();
@@ -362,6 +366,8 @@ export default function HomeScreen() {
   const openNewCase = () => {
     setEditingId(null);
     setDraft({ title: "", equipmentType: "Центробежный насос", assetTag: "", location: "", narrative: "" });
+    setEquipmentSearch("");
+    setCustomEquipment("");
     setDraftEvidence([]);
     setDraftTags([]);
     setTagInput("");
@@ -372,6 +378,8 @@ export default function HomeScreen() {
   const openEvidenceEditor = (item: PumpCase) => {
     setEditingId(item.id);
     setDraft({ title: item.title, equipmentType: item.equipmentType, assetTag: item.assetTag, location: item.location, narrative: item.narrative });
+    setEquipmentSearch("");
+    setCustomEquipment(isKnownEquipmentType(item.equipmentType) ? "" : item.equipmentType);
     setDraftEvidence(item.evidence);
     setDraftTags(item.tags ?? []);
     setTagInput("");
@@ -398,6 +406,8 @@ export default function HomeScreen() {
     setShowNewCase(false);
     setEditingId(null);
     setDraft({ title: "", equipmentType: "Центробежный насос", assetTag: "", location: "", narrative: "" });
+    setEquipmentSearch("");
+    setCustomEquipment("");
     setDraftEvidence([]);
     setDraftTags([]);
     setTagInput("");
@@ -405,7 +415,7 @@ export default function HomeScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
   };
 
-  const analyzeCase = async (item: PumpCase) => {
+  const analyzeCase = async (item: PumpCase, cacheOnly = false) => {
     setIsAnalyzing(true);
     try {
       const cacheKey = makeAiCacheKey("rca", { title: item.title, equipmentType: item.equipmentType, assetTag: item.assetTag, location: item.location, narrative: item.narrative, evidence: item.evidence.map((entry) => ({ kind: entry.kind, identity: entry.mediaHash ?? `${entry.name}|${entry.note ?? ""}`, fileSize: entry.fileSize, durationMs: entry.durationMs, width: entry.width, height: entry.height, note: entry.note, annotations: entry.annotations })) });
@@ -415,6 +425,10 @@ export default function HomeScreen() {
         const usage = await readAiUsage();
         await recordAiUsage({ cacheHits: usage.cacheHits + 1 });
         Alert.alert("RCA из кэша", "Для этого набора данных уже есть сохранённый результат. Новый AI-вызов не выполнялся.");
+        return;
+      }
+      if (cacheOnly) {
+        Alert.alert("В кэше нет результата", "AI-вызов не выполнялся. Сначала запустите обычный RCA-анализ, чтобы сохранить результат в кэш.");
         return;
       }
       for (const evidence of item.evidence) {
@@ -532,7 +546,7 @@ export default function HomeScreen() {
           <View style={styles.detailHeader}><View style={{ flex: 1 }}><Text style={[styles.detailEyebrow, { color: colors.primary }]}>АКТИВНЫЙ КЕЙС</Text><Text style={[styles.detailTitle, { color: colors.foreground }]}>{selectedCase.title}</Text></View><Pill background={selectedCase.severity === "Высокий" ? "#FFF0EC" : "#FFF3DD"} color={selectedCase.severity === "Высокий" ? "#C94D32" : "#A56600"}>{selectedCase.severity}</Pill></View>
           <Text style={[styles.detailNarrative, { color: colors.muted }]}>{selectedCase.narrative}</Text>
           <View style={styles.factGrid}><View><Text style={[styles.factLabel, { color: colors.muted }]}>Оборудование</Text><Text style={[styles.factValue, { color: colors.foreground }]}>{selectedCase.equipmentType}</Text></View><View><Text style={[styles.factLabel, { color: colors.muted }]}>Локация</Text><Text style={[styles.factValue, { color: colors.foreground }]}>{selectedCase.location}</Text></View></View>
-          <View style={styles.detailActions}><ActionButton label="Добавить данные" icon="add-photo-alternate" onPress={() => openEvidenceEditor(selectedCase)} colors={colors} /><ActionButton label={isAnalyzing ? "Анализирую…" : "Запустить RCA"} icon={isAnalyzing ? "hourglass-top" : "auto-awesome"} onPress={() => analyzeCase(selectedCase)} colors={colors} primary={selectedCase.evidence.length > 0} disabled={isAnalyzing} /><Pressable onPress={() => confirmDeleteCase(selectedCase)} style={({ pressed }) => [styles.deleteButton, { borderColor: colors.error, opacity: pressed ? 0.72 : 1 }]}><Icon name="delete-outline" size={18} color={colors.error} /><Text style={[styles.deleteButtonText, { color: colors.error }]}>Удалить</Text></Pressable></View>
+          <View style={styles.detailActions}><ActionButton label="Добавить данные" icon="add-photo-alternate" onPress={() => openEvidenceEditor(selectedCase)} colors={colors} /><ActionButton label={isAnalyzing ? "Анализирую…" : "Запустить RCA"} icon={isAnalyzing ? "hourglass-top" : "auto-awesome"} onPress={() => analyzeCase(selectedCase)} colors={colors} primary={selectedCase.evidence.length > 0} disabled={isAnalyzing} /><ActionButton label="Только кэш" icon="cached" onPress={() => analyzeCase(selectedCase, true)} colors={colors} disabled={isAnalyzing} /><Pressable onPress={() => confirmDeleteCase(selectedCase)} style={({ pressed }) => [styles.deleteButton, { borderColor: colors.error, opacity: pressed ? 0.72 : 1 }]}><Icon name="delete-outline" size={18} color={colors.error} /><Text style={[styles.deleteButtonText, { color: colors.error }]}>Удалить</Text></Pressable></View>
         </View>
 
         <View style={styles.sectionHeader}><View><Text style={[styles.sectionTitle, { color: colors.foreground }]}>Материалы расследования</Text><Text style={[styles.sectionSubtitle, { color: colors.muted }]}>{selectedCase.evidence.length} источника в кейсе</Text></View><Icon name="folder-open" size={22} color={colors.muted} /></View>
@@ -546,7 +560,7 @@ export default function HomeScreen() {
           <View style={styles.modalHeader}><View><Text style={[styles.modalEyebrow, { color: colors.primary }]}>{editingId ? "ДОПОЛНИТЬ КЕЙС" : "НОВОЕ РАССЛЕДОВАНИЕ"}</Text><Text style={[styles.modalTitle, { color: colors.foreground }]}>{editingId ? "Обновить материалы" : "Собрать кейс"}</Text></View><Pressable onPress={() => setShowNewCase(false)} style={[styles.closeButton, { backgroundColor: colors.surface }]}><Icon name="close" size={21} color={colors.foreground} /></Pressable></View>
           <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
             <Text style={[styles.inputLabel, { color: colors.foreground }]}>Название отказа</Text><TextInput value={draft.title} onChangeText={(value) => setDraft((current) => ({ ...current, title: value }))} placeholder="Например: разрушение торцевого уплотнения" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} />
-            <Text style={[styles.inputLabel, { color: colors.foreground }]}>Тип оборудования</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}><EquipmentChip label="Центробежный насос" active={draft.equipmentType === "Центробежный насос"} onPress={() => setDraft((current) => ({ ...current, equipmentType: "Центробежный насос" }))} colors={colors} /><EquipmentChip label="Шламовый насос" active={draft.equipmentType === "Шламовый насос"} onPress={() => setDraft((current) => ({ ...current, equipmentType: "Шламовый насос" }))} colors={colors} /><EquipmentChip label="Дозировочный" active={draft.equipmentType === "Дозировочный"} onPress={() => setDraft((current) => ({ ...current, equipmentType: "Дозировочный" }))} colors={colors} /></ScrollView>
+            <Text style={[styles.inputLabel, { color: colors.foreground }]}>Тип оборудования</Text><View style={[styles.equipmentPicker, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={[styles.searchBox, { borderColor: colors.border, backgroundColor: colors.background }]}><Icon name="search" size={18} color={colors.muted} /><TextInput value={equipmentSearch} onChangeText={setEquipmentSearch} placeholder="Поиск: например, пор..." placeholderTextColor={colors.muted} style={[styles.searchInput, { color: colors.foreground }]} /></View><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.equipmentChipRow}>{filteredEquipmentTypes.map((type) => <EquipmentChip key={type} label={type} active={draft.equipmentType === type} onPress={() => { setDraft((current) => ({ ...current, equipmentType: type })); setCustomEquipment(""); }} colors={colors} />)}<EquipmentChip label="Другой" active={Boolean(customEquipment) || !isKnownEquipmentType(draft.equipmentType)} onPress={() => setDraft((current) => ({ ...current, equipmentType: customEquipment || "" }))} colors={colors} /></ScrollView>{filteredEquipmentTypes.length === 0 && <Text style={[styles.noEquipmentText, { color: colors.muted }]}>Ничего не найдено. Выберите «Другой» и укажите тип вручную.</Text>}{(Boolean(customEquipment) || !isKnownEquipmentType(draft.equipmentType)) && <TextInput value={customEquipment} onChangeText={(value) => { setCustomEquipment(value); setDraft((current) => ({ ...current, equipmentType: value })); }} placeholder="Введите тип оборудования" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} />}</View>
             <View style={styles.twoInputs}><View style={{ flex: 1 }}><Text style={[styles.inputLabel, { color: colors.foreground }]}>Тег актива</Text><TextInput value={draft.assetTag} onChangeText={(value) => setDraft((current) => ({ ...current, assetTag: value }))} placeholder="P-204" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} /></View><View style={{ flex: 1 }}><Text style={[styles.inputLabel, { color: colors.foreground }]}>Локация</Text><TextInput value={draft.location} onChangeText={(value) => setDraft((current) => ({ ...current, location: value }))} placeholder="Цех 2" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} /></View></View>
             <Text style={[styles.inputLabel, { color: colors.foreground }]}>Что произошло?</Text><TextInput value={draft.narrative} onChangeText={(value) => setDraft((current) => ({ ...current, narrative: value }))} placeholder="Опишите события, симптомы и действия оператора…" placeholderTextColor={colors.muted} multiline numberOfLines={5} textAlignVertical="top" style={[styles.input, styles.textarea, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} />
             <Text style={[styles.inputLabel, { color: colors.foreground }]}>Теги кейса</Text><View style={styles.textEvidenceRow}><TextInput value={tagInput} onChangeText={setTagInput} onSubmitEditing={addDraftTag} placeholder="например: вибрация" placeholderTextColor={colors.muted} style={[styles.input, { flex: 1, backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} returnKeyType="done" /><Pressable onPress={addDraftTag} style={({ pressed }) => [styles.sendButton, { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 }]}><Icon name="add" size={20} color="#FFFFFF" /></Pressable></View>
@@ -701,6 +715,9 @@ const styles = StyleSheet.create({
   inputLabel: { fontSize: 12, fontWeight: "800", marginTop: 8, marginBottom: 1 },
   input: { minHeight: 46, borderRadius: 13, borderWidth: 1, paddingHorizontal: 13, fontSize: 13 },
   textarea: { minHeight: 116, paddingTop: 13 },
+  equipmentPicker: { borderWidth: 1, borderRadius: 15, padding: 10, gap: 9 },
+  equipmentChipRow: { gap: 8, paddingRight: 4 },
+  noEquipmentText: { fontSize: 11, lineHeight: 16, paddingHorizontal: 3 },
   twoInputs: { flexDirection: "row", gap: 10 },
   tagInputList: { flexDirection: "row", gap: 7, flexWrap: "wrap" },
   formTag: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 4 },
