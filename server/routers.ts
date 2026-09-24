@@ -5,6 +5,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import { z } from "zod";
 import { formatRcaEvidence } from "../shared/rca";
+import { buildRcaChatPrompt } from "../shared/chat";
 
 const evidenceSchema = z.object({
   kind: z.enum(["photo", "video", "text", "file"]),
@@ -64,6 +65,42 @@ export const appRouter = router({
     }),
   }),
   rca: router({
+    ask: publicProcedure
+      .input(z.object({
+        caseTitle: z.string().min(1).max(255),
+        equipmentType: z.string().max(120),
+        assetTag: z.string().max(120),
+        location: z.string().max(200),
+        narrative: z.string().max(8000),
+        result: z.object({
+          executiveSummary: z.string().max(6000),
+          eventChain: z.array(z.string().max(800)).max(20),
+          immediateCause: z.string().max(3000),
+          contributingFactors: z.array(z.string().max(1000)).max(20),
+          rootCause: z.string().max(3000),
+          recommendations: z.array(z.object({ priority: z.string().max(20), action: z.string().max(1000), owner: z.string().max(200), horizon: z.string().max(100) })).max(20),
+          confidence: z.number().min(0).max(100),
+          openQuestions: z.array(z.string().max(1000)).max(20),
+          methodNotes: z.string().max(3000),
+        }),
+        evidence: z.array(z.object({ kind: z.string().max(30), name: z.string().max(200), note: z.string().max(2000).optional() })).max(12),
+        history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).max(12),
+        question: z.string().min(1).max(2000),
+      }))
+      .mutation(async ({ input }) => {
+        const prompt = buildRcaChatPrompt({ ...input, history: [...input.history, { role: "user", content: input.question }] });
+        const response = await invokeLLM({
+          model: "gemini-3.1-pro-preview",
+          messages: [
+            { role: "system", content: "Ты — инженер по надёжности насосного оборудования, отвечающий на вопросы по существующему RCA-отчёту. Отвечай на русском языке." },
+            { role: "user", content: prompt },
+          ],
+          maxTokens: 1600,
+        });
+        const raw = response.choices[0]?.message?.content;
+        if (typeof raw !== "string" || !raw.trim()) throw new Error("RCA chat returned an empty response");
+        return { answer: raw.trim() };
+      }),
     analyze: publicProcedure
       .input(z.object({
         caseTitle: z.string().min(1).max(255),

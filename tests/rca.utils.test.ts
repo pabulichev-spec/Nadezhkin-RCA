@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { formatRcaEvidence, getConfidenceBand, hasActionableRca, matchesCaseFilters } from "../shared/rca";
+import { buildRcaChatPrompt } from "../shared/chat";
 import { buildRcaReportHtml } from "../shared/report";
 
 describe("RCA utilities", () => {
@@ -54,5 +55,32 @@ describe("RCA utilities", () => {
     expect(matchesCaseFilters(item, "p-204", "вибрация", "Готово")).toBe(true);
     expect(matchesCaseFilters(item, "p-204", "подача", "Готово")).toBe(false);
     expect(matchesCaseFilters(item, "p-204", "Все", "В работе")).toBe(false);
+  });
+
+  it("keeps the chat grounded in the selected RCA context", () => {
+    const prompt = buildRcaChatPrompt({
+      caseTitle: "Вибрация P-204",
+      equipmentType: "Центробежный насос",
+      assetTag: "P-204",
+      location: "Цех 2",
+      narrative: "Рост вибрации",
+      result: {
+        executiveSummary: "Гипотеза",
+        eventChain: ["Запуск", "Рост вибрации"],
+        immediateCause: "Перегрев",
+        contributingFactors: ["Нет контроля"],
+        rootCause: "Пробел в чек-листе",
+        recommendations: [],
+        confidence: 70,
+        openQuestions: ["Есть протокол?"],
+        methodNotes: "Нужна проверка",
+      },
+      evidence: [{ kind: "photo", name: "bearing.jpg", note: "След перегрева" }],
+      history: [{ role: "user", content: "Почему это корневая причина?" }],
+    });
+    expect(prompt).toContain("Пробел в чек-листе");
+    expect(prompt).toContain("След перегрева");
+    expect(prompt).toContain("Почему это корневая причина?");
+    expect(prompt).toContain("не выдумывай измерения");
   });
 });
