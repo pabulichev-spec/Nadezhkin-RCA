@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 
@@ -6,7 +6,7 @@ import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
 import type { RcaChatContext, RcaChatMessage } from "@/shared/chat";
 
-type RcaChatProps = { context: RcaChatContext };
+type RcaChatProps = { context: RcaChatContext; onHistoryChange: (history: RcaChatMessage[]) => void };
 
 const starters = [
   "Почему это считается корневой причиной?",
@@ -14,13 +14,15 @@ const starters = [
   "Какая рекомендация имеет наивысший приоритет?",
 ];
 
-export function RcaChat({ context }: RcaChatProps) {
+export function RcaChat({ context, onHistoryChange }: RcaChatProps) {
   const colors = useColors();
-  const [messages, setMessages] = useState<RcaChatMessage[]>([
-    { role: "assistant", content: "Я готов уточнить логику RCA, объяснить связь фактов с гипотезой или подсказать, какие проверки закрывают открытые вопросы." },
-  ]);
+  const [messages, setMessages] = useState<RcaChatMessage[]>(context.history.length > 0 ? context.history : [{ role: "assistant", content: "Я готов уточнить логику RCA, объяснить связь фактов с гипотезой или подсказать, какие проверки закрывают открытые вопросы." }]);
   const [question, setQuestion] = useState("");
   const chatMutation = trpc.rca.ask.useMutation();
+
+  useEffect(() => {
+    setMessages(context.history.length > 0 ? context.history : [{ role: "assistant", content: "Я готов уточнить логику RCA, объяснить связь фактов с гипотезой или подсказать, какие проверки закрывают открытые вопросы." }]);
+  }, [context.history]);
 
   const sendQuestion = async (value = question) => {
     const trimmed = value.trim();
@@ -28,12 +30,17 @@ export function RcaChat({ context }: RcaChatProps) {
     const userMessage: RcaChatMessage = { role: "user", content: trimmed };
     const nextMessages = [...messages, userMessage];
     setMessages(nextMessages);
+    onHistoryChange(nextMessages);
     setQuestion("");
     try {
       const response = await chatMutation.mutateAsync({ ...context, history: messages, question: trimmed });
-      setMessages((current) => [...current, { role: "assistant", content: response.answer }]);
+      const completedMessages = [...nextMessages, { role: "assistant" as const, content: response.answer }];
+      setMessages(completedMessages);
+      onHistoryChange(completedMessages);
     } catch {
-      setMessages((current) => [...current, { role: "assistant", content: "Не удалось получить ответ сейчас. Проверьте соединение и повторите вопрос — сам отчёт RCA сохранён." }]);
+      const failedMessages = [...nextMessages, { role: "assistant" as const, content: "Не удалось получить ответ сейчас. Проверьте соединение и повторите вопрос — сам отчёт RCA сохранён." }];
+      setMessages(failedMessages);
+      onHistoryChange(failedMessages);
     }
   };
 

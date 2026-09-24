@@ -30,7 +30,7 @@ import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
 import { getConfidenceBand, matchesCaseFilters, type PhotoAnnotation } from "@/shared/rca";
 import { buildRcaReportHtml } from "@/shared/report";
-import type { RcaChatContext } from "@/shared/chat";
+import type { RcaChatContext, RcaChatMessage } from "@/shared/chat";
 
 const STORAGE_KEY = "pumprca.cases.v1";
 
@@ -71,6 +71,7 @@ type PumpCase = {
   narrative: string;
   evidence: Evidence[];
   tags: string[];
+  chatHistory: RcaChatMessage[];
   result?: RcaResult;
   updatedAt: string;
 };
@@ -90,6 +91,7 @@ const demoCases: PumpCase[] = [
       { id: "e-2", kind: "text", name: "Журнал смены", note: "Вибрация 8.4 мм/с, рост за 3 часа", createdAt: "2026-09-22" },
     ],
     tags: ["вибрация", "подшипник", "центровка"],
+    chatHistory: [],
     result: {
       executiveSummary: "Наиболее вероятна комбинация разцентровки после смены агрегата и недостаточного контроля состояния муфты. Разрушение подшипника является следствием, а не первопричиной.",
       eventChain: ["Замена/запуск резервного агрегата", "Разцентровка муфты", "Рост радиальной вибрации", "Перегрев подшипника", "Останов насоса"],
@@ -121,6 +123,7 @@ const demoCases: PumpCase[] = [
       { id: "e-4", kind: "text", name: "Показания оператора", note: "Давление всасывания нестабильно", createdAt: "Сегодня" },
     ],
     tags: ["подача", "всасывание", "шлам"],
+    chatHistory: [],
     updatedAt: "Сегодня, 09:12",
   },
 ];
@@ -190,7 +193,7 @@ export default function HomeScreen() {
         try {
           const parsed = JSON.parse(raw) as PumpCase[];
           if (parsed.length > 0) {
-            const normalized = parsed.map((item) => ({ ...item, tags: item.tags?.length ? item.tags : item.id === "demo-1" ? ["вибрация", "подшипник", "центровка"] : item.id === "demo-2" ? ["подача", "всасывание", "шлам"] : [], evidence: item.evidence.map((entry) => ({ ...entry, annotations: entry.annotations ?? [] })) }));
+            const normalized = parsed.map((item) => ({ ...item, tags: item.tags?.length ? item.tags : item.id === "demo-1" ? ["вибрация", "подшипник", "центровка"] : item.id === "demo-2" ? ["подача", "всасывание", "шлам"] : [], chatHistory: item.chatHistory ?? [], evidence: item.evidence.map((entry) => ({ ...entry, annotations: entry.annotations ?? [] })) }));
             setCases(normalized);
             setSelectedId(normalized[0].id);
           }
@@ -275,7 +278,7 @@ export default function HomeScreen() {
     if (editingId) {
       const existing = cases.find((item) => item.id === editingId);
       if (existing) {
-        updateCase({ ...existing, evidence: existing.evidence.map((entry) => entry.id === annotationTarget.id ? { ...entry, annotations } : entry), status: "В работе", result: undefined, updatedAt: formatNow() });
+        updateCase({ ...existing, evidence: existing.evidence.map((entry) => entry.id === annotationTarget.id ? { ...entry, annotations } : entry), status: "В работе", result: undefined, chatHistory: [], updatedAt: formatNow() });
       }
     }
     setAnnotationTarget(null);
@@ -306,11 +309,11 @@ export default function HomeScreen() {
       Alert.alert("Укажите название", "Например: «Разрушение торцевого уплотнения Н-12».");
       return;
     }
-    const newCase: PumpCase = { id: makeId("case"), title: draft.title.trim(), equipmentType: draft.equipmentType, assetTag: draft.assetTag.trim() || "Не указан", location: draft.location.trim() || "Не указано", severity: "Высокий", status: "В работе", narrative: draft.narrative.trim() || "Описание события пока не добавлено.", evidence: draftEvidence, tags: draftTags, updatedAt: formatNow() };
+    const newCase: PumpCase = { id: makeId("case"), title: draft.title.trim(), equipmentType: draft.equipmentType, assetTag: draft.assetTag.trim() || "Не указан", location: draft.location.trim() || "Не указано", severity: "Высокий", status: "В работе", narrative: draft.narrative.trim() || "Описание события пока не добавлено.", evidence: draftEvidence, tags: draftTags, chatHistory: [], updatedAt: formatNow() };
     if (editingId) {
       const existing = cases.find((item) => item.id === editingId);
       if (existing) {
-        updateCase({ ...existing, title: newCase.title, equipmentType: newCase.equipmentType, assetTag: newCase.assetTag, location: newCase.location, narrative: newCase.narrative, evidence: newCase.evidence, tags: newCase.tags, status: "В работе", result: undefined, updatedAt: newCase.updatedAt });
+        updateCase({ ...existing, title: newCase.title, equipmentType: newCase.equipmentType, assetTag: newCase.assetTag, location: newCase.location, narrative: newCase.narrative, evidence: newCase.evidence, tags: newCase.tags, status: "В работе", result: undefined, chatHistory: [], updatedAt: newCase.updatedAt });
         setSelectedId(existing.id);
       }
     } else {
@@ -345,7 +348,7 @@ export default function HomeScreen() {
         return { kind: entry.kind, name: entry.name, note: [entry.note, annotationNote].filter(Boolean).join(". "), imageData };
       }));
       const result = await rcaMutation.mutateAsync({ caseTitle: item.title, equipmentType: item.equipmentType, assetTag: item.assetTag, location: item.location, narrative: item.narrative, evidence: payloadEvidence });
-      updateCase({ ...item, result, status: "Готово", updatedAt: formatNow() });
+      updateCase({ ...item, result, status: "Готово", chatHistory: [], updatedAt: formatNow() });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
       Alert.alert("RCA готов", "Выводы сформированы. Проверьте гипотезы и открытые вопросы перед выпуском отчёта.");
     } catch {
@@ -439,7 +442,7 @@ export default function HomeScreen() {
         <View style={styles.sectionHeader}><View><Text style={[styles.sectionTitle, { color: colors.foreground }]}>Материалы расследования</Text><Text style={[styles.sectionSubtitle, { color: colors.muted }]}>{selectedCase.evidence.length} источника в кейсе</Text></View><Icon name="folder-open" size={22} color={colors.muted} /></View>
         <View style={styles.evidenceList}>{selectedCase.evidence.map((item) => <View key={item.id} style={[styles.evidenceRow, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={[styles.evidenceIcon, { backgroundColor: item.kind === "photo" ? "#E7F0FF" : item.kind === "video" ? "#F2E9FF" : "#E5F5EF" }]}><Icon name={item.kind === "photo" ? "image" : item.kind === "video" ? "videocam" : item.kind === "file" ? "description" : "notes"} size={20} color={item.kind === "photo" ? "#3867D6" : item.kind === "video" ? "#8656C7" : "#16805D"} /></View><View style={{ flex: 1 }}><Text style={[styles.evidenceName, { color: colors.foreground }]}>{item.name}</Text><Text numberOfLines={1} style={[styles.evidenceNote, { color: colors.muted }]}>{item.note ?? (item.kind === "video" ? "Видеосвидетельство · будет взят кадр для AI-анализа" : item.annotations?.length ? `${item.annotations.length} маркеров повреждений` : "Добавлено в материалы кейса")}</Text></View>{item.kind === "photo" && <Pressable onPress={() => { setEditingId(selectedCase.id); setDraftEvidence(selectedCase.evidence); setAnnotationTarget(item); }} style={styles.annotateSmall}><Icon name="edit" size={16} color={colors.primary} /></Pressable>}<Icon name="check-circle" size={19} color={colors.success} /></View>)}</View>
 
-        {selectedCase.result ? <RcaSummary result={selectedCase.result} colors={colors} onExport={() => exportRcaReport(selectedCase)} isExporting={isExporting} chatContext={{ caseTitle: selectedCase.title, equipmentType: selectedCase.equipmentType, assetTag: selectedCase.assetTag, location: selectedCase.location, narrative: selectedCase.narrative, result: selectedCase.result, evidence: selectedCase.evidence.map((entry) => ({ kind: entry.kind, name: entry.name, note: entry.note })), history: [] }} /> : <View style={[styles.emptyRca, { backgroundColor: "#FFF8F3", borderColor: "#F6D6C8" }]}><View style={styles.emptyRcaIcon}><Icon name="auto-awesome" size={24} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.emptyRcaTitle, { color: colors.foreground }]}>RCA-вывод ещё не сформирован</Text><Text style={[styles.emptyRcaText, { color: colors.muted }]}>Добавьте факты, фотографии и видео. AI соберёт цепочку событий, разделит причины и покажет, чего не хватает для уверенного вывода.</Text></View></View>}
+        {selectedCase.result ? <RcaSummary result={selectedCase.result} colors={colors} onExport={() => exportRcaReport(selectedCase)} isExporting={isExporting} onHistoryChange={(history) => updateCase({ ...selectedCase, chatHistory: history })} chatContext={{ caseTitle: selectedCase.title, equipmentType: selectedCase.equipmentType, assetTag: selectedCase.assetTag, location: selectedCase.location, narrative: selectedCase.narrative, result: selectedCase.result, evidence: selectedCase.evidence.map((entry) => ({ kind: entry.kind, name: entry.name, note: entry.note })), history: selectedCase.chatHistory ?? [] }} /> : <View style={[styles.emptyRca, { backgroundColor: "#FFF8F3", borderColor: "#F6D6C8" }]}><View style={styles.emptyRcaIcon}><Icon name="auto-awesome" size={24} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.emptyRcaTitle, { color: colors.foreground }]}>RCA-вывод ещё не сформирован</Text><Text style={[styles.emptyRcaText, { color: colors.muted }]}>Добавьте факты, фотографии и видео. AI соберёт цепочку событий, разделит причины и покажет, чего не хватает для уверенного вывода.</Text></View></View>}
       </ScrollView>
 
       <Modal visible={showNewCase} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowNewCase(false)}>
@@ -477,10 +480,10 @@ function EvidenceButton({ label, icon, onPress, colors }: { label: string; icon:
   return <Pressable onPress={onPress} style={({ pressed }) => [styles.evidenceButton, { backgroundColor: colors.surface, borderColor: colors.border, opacity: pressed ? 0.75 : 1 }]}><Icon name={icon} size={20} color={colors.primary} /><Text style={[styles.evidenceButtonText, { color: colors.foreground }]}>{label}</Text></Pressable>;
 }
 
-function RcaSummary({ result, colors, onExport, isExporting, chatContext }: { result: RcaResult; colors: ReturnType<typeof useColors>; onExport: () => void; isExporting: boolean; chatContext: RcaChatContext }) {
+function RcaSummary({ result, colors, onExport, isExporting, chatContext, onHistoryChange }: { result: RcaResult; colors: ReturnType<typeof useColors>; onExport: () => void; isExporting: boolean; chatContext: RcaChatContext; onHistoryChange: (history: RcaChatMessage[]) => void }) {
   const confidenceBand = getConfidenceBand(result.confidence);
   const confidenceLabel = confidenceBand === "high" ? "высокая" : confidenceBand === "medium" ? "средняя" : "низкая";
-  return <View style={styles.resultStack}><View style={[styles.rcaCard, { backgroundColor: colors.foreground }]}><View style={styles.rcaHeader}><View><Text style={styles.rcaEyebrow}>AI RCA / ВЫВОДЫ</Text><Text style={styles.rcaTitle}>Гипотеза корневой причины</Text></View><View style={styles.confidence}><Text style={styles.confidenceNumber}>{result.confidence}%</Text><Text style={styles.confidenceLabel}>{confidenceLabel} уверенность</Text></View></View><Text style={styles.rcaSummaryText}>{result.executiveSummary}</Text><View style={styles.rootCauseBlock}><Text style={styles.rootCauseLabel}>ROOT CAUSE</Text><Text style={styles.rootCauseText}>{result.rootCause}</Text></View><View style={styles.timeline}>{result.eventChain.slice(0, 5).map((event, index) => <View key={`${event}-${index}`} style={styles.timelineRow}><View style={styles.timelineDot}><Text style={styles.timelineIndex}>{index + 1}</Text></View><Text style={styles.timelineText}>{event}</Text></View>)}</View><Text style={styles.subsectionLabel}>Следующие действия</Text>{result.recommendations.slice(0, 3).map((recommendation) => <View key={recommendation.action} style={styles.recommendation}><View style={styles.recommendationBadge}><Text style={styles.recommendationBadgeText}>{recommendation.priority}</Text></View><View style={{ flex: 1 }}><Text style={styles.recommendationAction}>{recommendation.action}</Text><Text style={styles.recommendationMeta}>{recommendation.owner} · {recommendation.horizon}</Text></View></View>)}<View style={styles.openQuestions}><Icon name="help-outline" size={19} color="#F7B08E" /><Text style={styles.openQuestionsText}>{result.openQuestions.length} открытых вопроса требуют проверки на месте</Text></View><Pressable disabled={isExporting} onPress={onExport} style={({ pressed }) => [styles.pdfButton, { opacity: isExporting ? 0.55 : pressed ? 0.8 : 1 }]}><Icon name={isExporting ? "hourglass-top" : "picture-as-pdf"} size={18} color="#FFFFFF" /><Text style={styles.pdfButtonText}>{isExporting ? "Формирую PDF…" : "Экспортировать RCA в PDF"}</Text></Pressable></View><RcaChat key={chatContext.caseTitle} context={chatContext} /></View>;
+  return <View style={styles.resultStack}><View style={[styles.rcaCard, { backgroundColor: colors.foreground }]}><View style={styles.rcaHeader}><View><Text style={styles.rcaEyebrow}>AI RCA / ВЫВОДЫ</Text><Text style={styles.rcaTitle}>Гипотеза корневой причины</Text></View><View style={styles.confidence}><Text style={styles.confidenceNumber}>{result.confidence}%</Text><Text style={styles.confidenceLabel}>{confidenceLabel} уверенность</Text></View></View><Text style={styles.rcaSummaryText}>{result.executiveSummary}</Text><View style={styles.rootCauseBlock}><Text style={styles.rootCauseLabel}>ROOT CAUSE</Text><Text style={styles.rootCauseText}>{result.rootCause}</Text></View><View style={styles.timeline}>{result.eventChain.slice(0, 5).map((event, index) => <View key={`${event}-${index}`} style={styles.timelineRow}><View style={styles.timelineDot}><Text style={styles.timelineIndex}>{index + 1}</Text></View><Text style={styles.timelineText}>{event}</Text></View>)}</View><Text style={styles.subsectionLabel}>Следующие действия</Text>{result.recommendations.slice(0, 3).map((recommendation) => <View key={recommendation.action} style={styles.recommendation}><View style={styles.recommendationBadge}><Text style={styles.recommendationBadgeText}>{recommendation.priority}</Text></View><View style={{ flex: 1 }}><Text style={styles.recommendationAction}>{recommendation.action}</Text><Text style={styles.recommendationMeta}>{recommendation.owner} · {recommendation.horizon}</Text></View></View>)}<View style={styles.openQuestions}><Icon name="help-outline" size={19} color="#F7B08E" /><Text style={styles.openQuestionsText}>{result.openQuestions.length} открытых вопроса требуют проверки на месте</Text></View><Pressable disabled={isExporting} onPress={onExport} style={({ pressed }) => [styles.pdfButton, { opacity: isExporting ? 0.55 : pressed ? 0.8 : 1 }]}><Icon name={isExporting ? "hourglass-top" : "picture-as-pdf"} size={18} color="#FFFFFF" /><Text style={styles.pdfButtonText}>{isExporting ? "Формирую PDF…" : "Экспортировать RCA в PDF"}</Text></Pressable></View><RcaChat key={chatContext.caseTitle} context={chatContext} onHistoryChange={onHistoryChange} /></View>;
 }
 
 const styles = StyleSheet.create({
