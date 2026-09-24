@@ -6,6 +6,8 @@ import * as ImagePicker from "expo-image-picker";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import * as VideoThumbnails from "expo-video-thumbnails";
+import * as ImageManipulator from "expo-image-manipulator";
+import * as Crypto from "expo-crypto";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -47,6 +49,11 @@ type Evidence = {
   mimeType?: string;
   note?: string;
   annotations?: PhotoAnnotation[];
+  fileSize?: number;
+  durationMs?: number;
+  width?: number;
+  height?: number;
+  mediaHash?: string;
   createdAt: string;
 };
 
@@ -129,6 +136,21 @@ const demoCases: PumpCase[] = [
 ];
 
 const makeId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+const MAX_IMAGE_DIMENSION = 1024;
+const MAX_VIDEO_FRAMES = 20;
+const MAX_TOTAL_VIDEO_FRAMES = 30;
+
+async function makeMediaHash(asset: { uri: string; fileSize?: number; duration?: number; width?: number; height?: number }) {
+  try {
+    if (!asset.fileSize || asset.fileSize <= 50 * 1024 * 1024) {
+      const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+      return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, base64);
+    }
+  } catch {
+    // Fall back to a stable fingerprint when the platform blocks full-file reads.
+  }
+  return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${asset.uri}|${asset.fileSize ?? 0}|${asset.duration ?? 0}|${asset.width ?? 0}x${asset.height ?? 0}`);
+}
 
 function formatNow() {
   return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date());
@@ -155,6 +177,30 @@ async function toDataUrl(uri: string, mimeType = "image/jpeg") {
   } catch {
     return undefined;
   }
+}
+
+async function compressMediaFrame(uri: string, width?: number, height?: number) {
+  const maxSide = Math.max(width ?? MAX_IMAGE_DIMENSION, height ?? MAX_IMAGE_DIMENSION);
+  const actions = maxSide > MAX_IMAGE_DIMENSION
+    ? [{ resize: width && height && width >= height ? { width: MAX_IMAGE_DIMENSION } : { height: MAX_IMAGE_DIMENSION } }]
+    : [];
+  const result = await ImageManipulator.manipulateAsync(uri, actions, { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG });
+  return toDataUrl(result.uri, "image/jpeg");
+}
+
+function getVideoFrameTimes(durationMs?: number) {
+  if (!durationMs || durationMs <= 0) return [500];
+  const durationSeconds = durationMs / 1000;
+  const intervalSeconds = durationSeconds > 30 ? 5 : 1;
+  const count = Math.min(MAX_VIDEO_FRAMES, Math.max(1, Math.ceil(durationSeconds / intervalSeconds)));
+  return Array.from({ length: count }, (_, index) => Math.min(durationMs - 1, Math.max(0, index * intervalSeconds * 1000)));
+}
+
+function askHeavyMediaConfirmation(item: Evidence) {
+  const sizeMb = (item.fileSize ?? 0) / (1024 * 1024);
+  const isHeavy = item.kind === "video" ? sizeMb > 10 : item.kind === "photo" && sizeMb > 5;
+  if (!isHeavy) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => Alert.alert("Тяжёлый медиафайл", "Анализ этого файла может занять больше токенов. Продолжить?", [{ text: "Отмена", style: "cancel", onPress: () => resolve(false) }, { text: "Продолжить", onPress: () => resolve(true) }], { cancelable: false }));
 }
 
 function Icon({ name, size = 20, color }: { name: React.ComponentProps<typeof MaterialIcons>["name"]; size?: number; color: string }) {
@@ -264,7 +310,8 @@ export default function HomeScreen() {
         result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: mode === "video" ? ImagePicker.MediaTypeOptions.Videos : ImagePicker.MediaTypeOptions.All, quality: 0.7, allowsMultipleSelection: true });
       }
       if (result.canceled) return;
-      result.assets.forEach((asset) => addEvidence({ id: makeId("ev"), kind: asset.type === "video" ? "video" : "photo", name: asset.fileName ?? (asset.type === "video" ? "видео.mp4" : "фото.jpg"), uri: asset.uri, mimeType: asset.mimeType ?? (asset.type === "video" ? "video/mp4" : "image/jpeg"), createdAt: "только что" }));
+      const prepared = await Promise.all(result.assets.map(async (asset) => ({ id: makeId("ev"), kind: asset.type === "video" ? "video" as const : "photo" as const, name: asset.fileName ?? (asset.type === "video" ? "видео.mp4" : "фото.jpg"), uri: asset.uri, mimeType: asset.mimeType ?? (asset.type === "video" ? "video/mp4" : "image/jpeg"), fileSize: asset.fileSize, durationMs: asset.duration ?? undefined, width: asset.width, height: asset.height, mediaHash: await makeMediaHash({ ...asset, duration: asset.duration ?? undefined }), createdAt: "только что" })));
+      prepared.forEach(addEvidence);
     } catch {
       Alert.alert("Не удалось добавить медиа", "Попробуйте выбрать файл ещё раз.");
     } finally {
@@ -361,7 +408,7 @@ export default function HomeScreen() {
   const analyzeCase = async (item: PumpCase) => {
     setIsAnalyzing(true);
     try {
-      const cacheKey = makeAiCacheKey("rca", { title: item.title, equipmentType: item.equipmentType, assetTag: item.assetTag, location: item.location, narrative: item.narrative, evidence: item.evidence.map((entry) => ({ kind: entry.kind, name: entry.name, uri: entry.uri, note: entry.note, annotations: entry.annotations })) });
+      const cacheKey = makeAiCacheKey("rca", { title: item.title, equipmentType: item.equipmentType, assetTag: item.assetTag, location: item.location, narrative: item.narrative, evidence: item.evidence.map((entry) => ({ kind: entry.kind, identity: entry.mediaHash ?? `${entry.name}|${entry.note ?? ""}`, fileSize: entry.fileSize, durationMs: entry.durationMs, width: entry.width, height: entry.height, note: entry.note, annotations: entry.annotations })) });
       const cachedResult = await readAiCache<RcaResult>(cacheKey);
       if (cachedResult) {
         updateCase({ ...item, result: cachedResult, status: "Готово", updatedAt: formatNow() });
@@ -370,22 +417,31 @@ export default function HomeScreen() {
         Alert.alert("RCA из кэша", "Для этого набора данных уже есть сохранённый результат. Новый AI-вызов не выполнялся.");
         return;
       }
+      for (const evidence of item.evidence) {
+        if (!(await askHeavyMediaConfirmation(evidence))) return;
+      }
       const usage = await readAiUsage();
       await recordAiUsage({ cacheMisses: usage.cacheMisses + 1, rcaCalls: usage.rcaCalls + 1 });
-      const payloadEvidence = await Promise.all(item.evidence.map(async (entry) => {
-        let imageData: string | undefined;
-        if (entry.kind === "photo" && entry.uri) imageData = await toDataUrl(entry.uri, entry.mimeType);
-        if (entry.kind === "video" && entry.uri) {
-          try {
-            const thumbnail = await VideoThumbnails.getThumbnailAsync(entry.uri, { time: 500 });
-            imageData = await toDataUrl(thumbnail.uri, "image/jpeg");
-          } catch {
-            imageData = undefined;
-          }
-        }
+      let totalVideoFrames = 0;
+      const payloadEvidence = (await Promise.all(item.evidence.map(async (entry) => {
         const annotationNote = entry.annotations?.length ? `Маркеры на фото: ${entry.annotations.map((annotation) => annotation.text).join("; ")}` : "";
-        return { kind: entry.kind, name: entry.name, note: [entry.note, annotationNote].filter(Boolean).join(". "), imageData };
-      }));
+        if (entry.kind === "video" && entry.uri) {
+          const frameTimes = getVideoFrameTimes(entry.durationMs).slice(0, Math.max(0, Math.min(MAX_VIDEO_FRAMES, MAX_TOTAL_VIDEO_FRAMES - totalVideoFrames)));
+          totalVideoFrames += frameTimes.length;
+          const frames = await Promise.all(frameTimes.map(async (time, index) => {
+            try {
+              const thumbnail = await VideoThumbnails.getThumbnailAsync(entry.uri!, { time, quality: 0.8 });
+              const imageData = await compressMediaFrame(thumbnail.uri, thumbnail.width, thumbnail.height);
+              return { kind: "video" as const, name: `${entry.name} · кадр ${index + 1}/${frameTimes.length}`, note: [entry.note, annotationNote, `Кадр ${Math.round(time / 1000)} с`].filter(Boolean).join(". "), imageData };
+            } catch {
+              return undefined;
+            }
+          }));
+          return frames.filter((frame): frame is NonNullable<typeof frame> => Boolean(frame));
+        }
+        const imageData = entry.kind === "photo" && entry.uri ? await compressMediaFrame(entry.uri, entry.width, entry.height) : undefined;
+        return [{ kind: entry.kind, name: entry.name, note: [entry.note, annotationNote].filter(Boolean).join(". "), imageData }];
+      }))).flat();
       const result = await rcaMutation.mutateAsync({ caseTitle: item.title, equipmentType: item.equipmentType, assetTag: item.assetTag, location: item.location, narrative: item.narrative, evidence: payloadEvidence });
       await writeAiCache(cacheKey, result);
       updateCase({ ...item, result, status: "Готово", chatHistory: [], updatedAt: formatNow() });

@@ -3,16 +3,39 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { EMPTY_AI_USAGE, mergeAiUsage, type AiUsageStats } from "@/shared/ai";
 
 const USAGE_KEY = "pumprca.ai.usage.v1";
-const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const CACHE_TTL_KEY = "pumprca.ai.cache-ttl-days.v1";
+const DEFAULT_TTL_DAYS = 7;
+const ALLOWED_TTL_DAYS = [1, 3, 7, 14, 30] as const;
 
 type CacheEnvelope<T> = { createdAt: number; value: T };
+
+export type CacheTtlDays = typeof ALLOWED_TTL_DAYS[number];
+
+export async function getCacheTtlDays(): Promise<CacheTtlDays> {
+  try {
+    const raw = await AsyncStorage.getItem(CACHE_TTL_KEY);
+    const days = Number(raw);
+    return (ALLOWED_TTL_DAYS.includes(days as CacheTtlDays) ? days : DEFAULT_TTL_DAYS) as CacheTtlDays;
+  } catch {
+    return DEFAULT_TTL_DAYS;
+  }
+}
+
+export async function setCacheTtlDays(days: CacheTtlDays) {
+  await AsyncStorage.setItem(CACHE_TTL_KEY, String(days));
+}
+
+export function getAllowedCacheTtlDays() {
+  return ALLOWED_TTL_DAYS;
+}
 
 export async function readAiCache<T>(key: string): Promise<T | undefined> {
   try {
     const raw = await AsyncStorage.getItem(key);
     if (!raw) return undefined;
     const entry = JSON.parse(raw) as CacheEnvelope<T>;
-    if (!entry.createdAt || Date.now() - entry.createdAt > CACHE_TTL_MS) {
+    const ttlMs = (await getCacheTtlDays()) * 24 * 60 * 60 * 1000;
+    if (!entry.createdAt || Date.now() - entry.createdAt > ttlMs) {
       await AsyncStorage.removeItem(key);
       return undefined;
     }

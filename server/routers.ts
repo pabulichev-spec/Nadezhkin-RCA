@@ -107,7 +107,7 @@ export const appRouter = router({
         assetTag: z.string().max(120),
         location: z.string().max(200),
         narrative: z.string().max(8000),
-        evidence: z.array(evidenceSchema).max(12),
+        evidence: z.array(evidenceSchema).max(30),
       }))
       .mutation(async ({ input }) => {
         const evidenceText = input.evidence.map((item, index) => {

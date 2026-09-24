@@ -5,15 +5,16 @@ import { useFocusEffect } from "expo-router";
 
 import { ScreenContainer } from "@/components/screen-container";
 import { useColors } from "@/hooks/use-colors";
-import { clearAiCache, readAiUsage } from "@/lib/ai-cache";
+import { clearAiCache, getAllowedCacheTtlDays, getCacheTtlDays, readAiUsage, setCacheTtlDays, type CacheTtlDays } from "@/lib/ai-cache";
 import { EMPTY_AI_USAGE, type AiUsageStats } from "@/shared/ai";
 
 export default function UsageScreen() {
   const colors = useColors();
   const [usage, setUsage] = useState<AiUsageStats>(EMPTY_AI_USAGE);
+  const [cacheTtlDays, setCacheTtlDaysState] = useState<CacheTtlDays>(7);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async () => setUsage(await readAiUsage()), []);
+  const load = useCallback(async () => { setUsage(await readAiUsage()); setCacheTtlDaysState(await getCacheTtlDays()); }, []);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const refresh = async () => {
@@ -36,11 +37,13 @@ export default function UsageScreen() {
       <Text style={[styles.title, { color: colors.foreground }]}>Расход AI и кэш</Text>
       <Text style={[styles.subtitle, { color: colors.muted }]}>Локальная статистика этого приложения. Обновите экран, чтобы увидеть последние сохранённые данные.</Text>
 
-      <View style={[styles.notice, { backgroundColor: "#FFF8F3", borderColor: "#F6D6C8" }]}><MaterialIcons name="info-outline" size={21} color={colors.primary} /><Text style={[styles.noticeText, { color: colors.foreground }]}>Реальный баланс Manus-кредитов не передаётся мобильному приложению через доступный API. Поэтому здесь не показывается вымышленный остаток; актуальный баланс проверяется в аккаунте Manus.</Text></View>
+      <View style={[styles.notice, { backgroundColor: "#1E1E1E", borderColor: "#3A3A3A" }]}><MaterialIcons name="info-outline" size={21} color="#F7B08E" /><Text style={[styles.noticeText, { color: "#FFFFFF" }]}>Реальный баланс Manus-кредитов не передаётся мобильному приложению через доступный API. Поэтому здесь не показывается вымышленный остаток; актуальный баланс проверяется в аккаунте Manus.</Text></View>
 
       <View style={styles.grid}><Stat label="AI-вызовов" value={String(totalCalls)} colors={colors} icon="auto-awesome" /><Stat label="RCA-анализов" value={String(usage.rcaCalls)} colors={colors} icon="analytics" /><Stat label="Вопросов в чате" value={String(usage.chatCalls)} colors={colors} icon="forum" /><Stat label="Попаданий в кэш" value={`${usage.cacheHits} · ${hitRate}%`} colors={colors} icon="cached" /></View>
 
-      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.cardTitle, { color: colors.foreground }]}>Как приложение экономит вызовы</Text><Text style={[styles.cardText, { color: colors.muted }]}>Одинаковый RCA-запрос и одинаковый вопрос в чате сохраняются на устройстве на 7 дней. Повторный запрос возвращается из кэша без обращения к модели. Изменение материалов, описания или истории создаёт новый ключ кэша.</Text><Pressable onPress={clearCache} style={({ pressed }) => [styles.secondaryButton, { borderColor: colors.border, opacity: pressed ? 0.72 : 1 }]}><MaterialIcons name="delete-sweep" size={18} color={colors.primary} /><Text style={[styles.secondaryText, { color: colors.foreground }]}>Очистить кэш AI</Text></Pressable></View>
+      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.cardTitle, { color: colors.foreground }]}>Как приложение экономит вызовы</Text><Text style={[styles.cardText, { color: colors.muted }]}>Одинаковый RCA-запрос и одинаковый вопрос в чате сохраняются на устройстве на {cacheTtlDays} дн. Повторный запрос возвращается из кэша без обращения к модели. Изменение материалов, описания или истории создаёт новый ключ кэша.</Text><Pressable onPress={clearCache} style={({ pressed }) => [styles.secondaryButton, { borderColor: colors.border, opacity: pressed ? 0.72 : 1 }]}><MaterialIcons name="delete-sweep" size={18} color={colors.primary} /><Text style={[styles.secondaryText, { color: colors.foreground }]}>Очистить кэш AI</Text></Pressable></View>
+
+      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.cardTitle, { color: colors.foreground }]}>Настройки кэша</Text><Text style={[styles.cardText, { color: colors.muted }]}>Срок хранения результатов на этом устройстве. Чем дольше срок, тем меньше повторных AI-вызовов.</Text><View style={styles.ttlRow}>{getAllowedCacheTtlDays().map((days) => <Pressable key={days} onPress={async () => { await setCacheTtlDays(days); setCacheTtlDaysState(days); }} style={({ pressed }) => [styles.ttlButton, { backgroundColor: cacheTtlDays === days ? colors.primary : colors.background, borderColor: cacheTtlDays === days ? colors.primary : colors.border, opacity: pressed ? 0.72 : 1 }]}><Text style={[styles.ttlText, { color: cacheTtlDays === days ? "#FFFFFF" : colors.foreground }]}>{days} дн.</Text></Pressable>)}</View></View>
 
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}><Text style={[styles.cardTitle, { color: colors.foreground }]}>Оптимизация промптов</Text><Text style={[styles.cardText, { color: colors.muted }]}>Повторяющиеся инструкции сокращены, контекст передаётся компактными полями, а строгая JSON-схема сохраняется. Это уменьшает входной текст без отказа от требований RCA и SMART.</Text><Pressable onPress={() => Linking.openURL("https://help.manus.im")} style={({ pressed }) => [styles.secondaryButton, { borderColor: colors.border, opacity: pressed ? 0.72 : 1 }]}><MaterialIcons name="open-in-new" size={17} color={colors.primary} /><Text style={[styles.secondaryText, { color: colors.foreground }]}>Проверить баланс в Manus Help</Text></Pressable></View>
 
@@ -69,5 +72,8 @@ const styles = StyleSheet.create({
   cardText: { fontSize: 12, lineHeight: 18 },
   secondaryButton: { minHeight: 42, borderWidth: 1, borderRadius: 11, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
   secondaryText: { fontSize: 12, fontWeight: "800" },
+  ttlRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  ttlButton: { minWidth: 58, minHeight: 38, borderWidth: 1, borderRadius: 10, alignItems: "center", justifyContent: "center", paddingHorizontal: 9 },
+  ttlText: { fontSize: 12, fontWeight: "800" },
   updated: { fontSize: 10, textAlign: "center" },
 });
