@@ -11,11 +11,10 @@ export type RcaChatContext = {
   narrative: string;
   result: {
     executiveSummary: string;
-    eventChain: string[];
-    immediateCause: string;
-    contributingFactors: string[];
-    rootCause: string;
-    recommendations: { priority: string; action: string; owner: string; horizon: string }[];
+    physicalCause: string;
+    humanFactor: string;
+    systemicCause: string;
+    smartActions: { priority: string; specific: string; measurable: string; achievable: string; relevant: string; timeBound: string }[];
     confidence: number;
     openQuestions: string[];
     methodNotes: string;
@@ -44,12 +43,11 @@ export function buildRcaChatPrompt(context: RcaChatContext) {
 
 Итог RCA:
 Краткий вывод: ${result.executiveSummary}
-Цепочка событий: ${result.eventChain.join(" → ")}
-Непосредственная причина: ${result.immediateCause}
-Способствующие факторы: ${result.contributingFactors.join("; ")}
-Корневая причина: ${result.rootCause}
+1. Физическая причина: ${result.physicalCause}
+2. Человеческий фактор: ${result.humanFactor}
+3. Системная причина: ${result.systemicCause}
+4. SMART-мероприятия: ${result.smartActions.map((item) => `${item.priority}: S=${item.specific}; M=${item.measurable}; A=${item.achievable}; R=${item.relevant}; T=${item.timeBound}`).join(" | ")}
 Уверенность: ${result.confidence}%
-Рекомендации: ${result.recommendations.map((item) => `${item.priority}: ${item.action} (${item.owner}, ${item.horizon})`).join("; ")}
 Открытые вопросы: ${result.openQuestions.join("; ")}
 Ограничения: ${result.methodNotes}
 

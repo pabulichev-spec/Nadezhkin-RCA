@@ -18,21 +18,22 @@ const rcaOutputSchema = {
   type: "object",
   properties: {
     executiveSummary: { type: "string" },
-    eventChain: { type: "array", items: { type: "string" } },
-    immediateCause: { type: "string" },
-    contributingFactors: { type: "array", items: { type: "string" } },
-    rootCause: { type: "string" },
-    recommendations: {
+    physicalCause: { type: "string" },
+    humanFactor: { type: "string" },
+    systemicCause: { type: "string" },
+    smartActions: {
       type: "array",
       items: {
         type: "object",
         properties: {
           priority: { type: "string" },
-          action: { type: "string" },
-          owner: { type: "string" },
-          horizon: { type: "string" },
+          specific: { type: "string" },
+          measurable: { type: "string" },
+          achievable: { type: "string" },
+          relevant: { type: "string" },
+          timeBound: { type: "string" },
         },
-        required: ["priority", "action", "owner", "horizon"],
+        required: ["priority", "specific", "measurable", "achievable", "relevant", "timeBound"],
         additionalProperties: false,
       },
     },
@@ -42,11 +43,10 @@ const rcaOutputSchema = {
   },
   required: [
     "executiveSummary",
-    "eventChain",
-    "immediateCause",
-    "contributingFactors",
-    "rootCause",
-    "recommendations",
+    "physicalCause",
+    "humanFactor",
+    "systemicCause",
+    "smartActions",
     "confidence",
     "openQuestions",
     "methodNotes",
@@ -74,11 +74,10 @@ export const appRouter = router({
         narrative: z.string().max(8000),
         result: z.object({
           executiveSummary: z.string().max(6000),
-          eventChain: z.array(z.string().max(800)).max(20),
-          immediateCause: z.string().max(3000),
-          contributingFactors: z.array(z.string().max(1000)).max(20),
-          rootCause: z.string().max(3000),
-          recommendations: z.array(z.object({ priority: z.string().max(20), action: z.string().max(1000), owner: z.string().max(200), horizon: z.string().max(100) })).max(20),
+          physicalCause: z.string().max(3000),
+          humanFactor: z.string().max(3000),
+          systemicCause: z.string().max(3000),
+          smartActions: z.array(z.object({ priority: z.string().max(20), specific: z.string().max(1000), measurable: z.string().max(1000), achievable: z.string().max(1000), relevant: z.string().max(1000), timeBound: z.string().max(200) })).max(20),
           confidence: z.number().min(0).max(100),
           openQuestions: z.array(z.string().max(1000)).max(20),
           methodNotes: z.string().max(3000),
@@ -130,9 +129,9 @@ ${evidenceText || "Материалы не приложены."}
 Правила анализа:
 1) Разделяй подтверждённые факты, рабочие гипотезы и пробелы в данных.
 2) Построй цепочку событий от нормальной работы до отказа.
-3) Укажи непосредственную причину, способствующие факторы и системную корневую причину.
-4) Примени логику 5 Why и анализ барьеров: что должно было предотвратить событие и почему барьер не сработал.
-5) Рекомендации должны быть конкретными, измеримыми и иметь владельца/горизонт.
+3) Верни строго четыре смысловых блока: physicalCause — физическая причина отказа; humanFactor — действия или бездействие персонала; systemicCause — не сработавшие процессы, регламенты или системы; smartActions — массив мероприятий, где каждое содержит отдельные поля specific, measurable, achievable, relevant, timeBound.
+4) Примени логику 5 Why и анализ барьеров внутри этих четырёх блоков, не добавляя другие блоки причин.
+5) Каждое SMART-мероприятие должно быть конкретным, измеримым, выполнимым, связанным с проблемой и иметь срок.
 6) Не выдавай догадку за доказанный факт; если материалов мало, понизь confidence и добавь openQuestions.
 7) Это рабочая инженерная гипотеза, а не разрешение на эксплуатацию. В methodNotes зафиксируй ограничения анализа.`,
         }];

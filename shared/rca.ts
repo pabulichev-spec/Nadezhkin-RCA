@@ -29,8 +29,12 @@ export function formatRcaEvidence(kind: string, name: string, note?: string, ann
   return note?.trim() ? `${base}. Примечание: ${note.trim()}${annotationText}` : `${base}.${annotationText}`;
 }
 
-export function hasActionableRca(result: { rootCause?: string; recommendations?: unknown[]; openQuestions?: unknown[] }) {
-  return Boolean(result.rootCause?.trim()) && Boolean(result.recommendations?.length) && Array.isArray(result.openQuestions);
+export function hasActionableRca(result: { systemicCause?: string; smartActions?: unknown[]; openQuestions?: unknown[] }) {
+  return Boolean(result.systemicCause?.trim()) && Boolean(result.smartActions?.length) && Array.isArray(result.openQuestions);
+}
+
+export function removeCaseById<T extends { id: string }>(items: T[], id: string) {
+  return items.filter((item) => item.id !== id);
 }
 
 export function matchesCaseFilters(item: CaseFilterRecord, query: string, activeTag: string, activeStatus: string) {

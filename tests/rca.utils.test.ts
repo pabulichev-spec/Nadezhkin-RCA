@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatRcaEvidence, getConfidenceBand, hasActionableRca, matchesCaseFilters } from "../shared/rca";
+import { formatRcaEvidence, getConfidenceBand, hasActionableRca, matchesCaseFilters, removeCaseById } from "../shared/rca";
 import { buildRcaChatPrompt } from "../shared/chat";
 import { buildRcaReportHtml } from "../shared/report";
 
@@ -18,9 +18,9 @@ describe("RCA utilities", () => {
   });
 
   it("accepts only actionable RCA output", () => {
-    expect(hasActionableRca({ rootCause: "Process gap", recommendations: [{ action: "Add check" }], openQuestions: [] })).toBe(true);
-    expect(hasActionableRca({ rootCause: "", recommendations: [{ action: "Add check" }], openQuestions: [] })).toBe(false);
-    expect(hasActionableRca({ rootCause: "Process gap", recommendations: [], openQuestions: [] })).toBe(false);
+    expect(hasActionableRca({ systemicCause: "Process gap", smartActions: [{ specific: "Add check" }], openQuestions: [] })).toBe(true);
+    expect(hasActionableRca({ systemicCause: "", smartActions: [{ specific: "Add check" }], openQuestions: [] })).toBe(false);
+    expect(hasActionableRca({ systemicCause: "Process gap", smartActions: [], openQuestions: [] })).toBe(false);
   });
 
   it("builds an exportable report with root cause and marker notes", () => {
@@ -35,17 +35,20 @@ describe("RCA utilities", () => {
       evidence: [{ kind: "photo", name: "bearing.jpg", annotations: [{ id: "m1", x: 0.3, y: 0.2, text: "след перегрева" }] }],
       result: {
         executiveSummary: "Рабочая гипотеза",
-        eventChain: ["Рост вибрации", "Останов"],
-        immediateCause: "Перегрев",
-        contributingFactors: ["Нет контроля"],
-        rootCause: "Пробел в процессе запуска",
-        recommendations: [{ priority: "P1", action: "Проверить центровку", owner: "Механики", horizon: "24 часа" }],
+        physicalCause: "Перегрев",
+        humanFactor: "Нет контроля",
+        systemicCause: "Пробел в процессе запуска",
+        smartActions: [{ priority: "P1", specific: "Проверить центровку", measurable: "Вибрация до 4 мм/с", achievable: "Механики", relevant: "Исключить повторный отказ", timeBound: "24 часа" }],
         confidence: 78,
         openQuestions: ["Есть протокол?"],
         methodNotes: "Требуется проверка",
       },
     }, "24 сен 2026");
     expect(html).toContain("Пробел в процессе запуска");
+    expect(html).toContain("Физическая причина");
+    expect(html).toContain("Человеческий фактор");
+    expect(html).toContain("Системная причина");
+    expect(html).toContain("SMART");
     expect(html).toContain("след перегрева");
     expect(html).toContain("PUMPRCA / RCA REPORT");
   });
@@ -66,11 +69,10 @@ describe("RCA utilities", () => {
       narrative: "Рост вибрации",
       result: {
         executiveSummary: "Гипотеза",
-        eventChain: ["Запуск", "Рост вибрации"],
-        immediateCause: "Перегрев",
-        contributingFactors: ["Нет контроля"],
-        rootCause: "Пробел в чек-листе",
-        recommendations: [],
+        physicalCause: "Перегрев",
+        humanFactor: "Нет контроля",
+        systemicCause: "Пробел в чек-листе",
+        smartActions: [],
         confidence: 70,
         openQuestions: ["Есть протокол?"],
         methodNotes: "Нужна проверка",
@@ -82,5 +84,10 @@ describe("RCA utilities", () => {
     expect(prompt).toContain("След перегрева");
     expect(prompt).toContain("Почему это корневая причина?");
     expect(prompt).toContain("не выдумывай измерения");
+  });
+
+  it("removes only the requested investigation", () => {
+    const remaining = removeCaseById([{ id: "a" }, { id: "b" }, { id: "c" }], "b");
+    expect(remaining.map((item) => item.id)).toEqual(["a", "c"]);
   });
 });

@@ -28,7 +28,7 @@ import { PhotoAnnotationEditor } from "@/components/photo-annotation-editor";
 import { RcaChat } from "@/components/rca-chat";
 import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
-import { getConfidenceBand, matchesCaseFilters, type PhotoAnnotation } from "@/shared/rca";
+import { getConfidenceBand, matchesCaseFilters, removeCaseById, type PhotoAnnotation } from "@/shared/rca";
 import { buildRcaReportHtml } from "@/shared/report";
 import type { RcaChatContext, RcaChatMessage } from "@/shared/chat";
 
@@ -50,11 +50,10 @@ type Evidence = {
 
 type RcaResult = {
   executiveSummary: string;
-  eventChain: string[];
-  immediateCause: string;
-  contributingFactors: string[];
-  rootCause: string;
-  recommendations: { priority: string; action: string; owner: string; horizon: string }[];
+  physicalCause: string;
+  humanFactor: string;
+  systemicCause: string;
+  smartActions: { priority: string; specific: string; measurable: string; achievable: string; relevant: string; timeBound: string }[];
   confidence: number;
   openQuestions: string[];
   methodNotes: string;
@@ -94,14 +93,13 @@ const demoCases: PumpCase[] = [
     chatHistory: [],
     result: {
       executiveSummary: "Наиболее вероятна комбинация разцентровки после смены агрегата и недостаточного контроля состояния муфты. Разрушение подшипника является следствием, а не первопричиной.",
-      eventChain: ["Замена/запуск резервного агрегата", "Разцентровка муфты", "Рост радиальной вибрации", "Перегрев подшипника", "Останов насоса"],
-      immediateCause: "Перегрев и повреждение подшипникового узла из-за повышенной вибрации.",
-      contributingFactors: ["Не зафиксированы измерения центровки после монтажа", "Нет тревоги по тренду вибрации на 1-м уровне", "Осмотр муфты не входил в чек-лист запуска"],
-      rootCause: "Процесс ввода резервного насоса в эксплуатацию не содержит обязательной верификации центровки и контрольной вибродиагностики.",
-      recommendations: [
-        { priority: "P1", action: "Проверить центровку и состояние муфты P-204, повторить виброизмерения", owner: "Механическая служба", horizon: "24 часа" },
-        { priority: "P1", action: "Добавить контроль центровки в чек-лист после монтажа и запуска", owner: "Технический надзор", horizon: "7 дней" },
-        { priority: "P2", action: "Настроить предупреждение по тренду вибрации 6 мм/с", owner: "АСУ ТП", horizon: "30 дней" },
+      physicalCause: "Повышенная вибрация из-за вероятной разцентровки муфты вызвала перегрев и повреждение подшипника.",
+      humanFactor: "После установки резервного агрегата не были зафиксированы контрольные измерения центровки, а осмотр муфты не вошёл в действия оператора при запуске.",
+      systemicCause: "Процесс ввода резервного насоса в эксплуатацию не содержит обязательной верификации центровки и контрольной вибродиагностики.",
+      smartActions: [
+        { priority: "P1", specific: "Провести инструментальный контроль посадочных мест и центровки муфты P-204", measurable: "Получить вибрацию не выше 4 мм/с и оформить протокол измерений", achievable: "Силами механической службы и службы надёжности", relevant: "Для подтверждения качества ремонта и исключения повторного повреждения подшипника", timeBound: "До следующего пуска насоса" },
+        { priority: "P1", specific: "Добавить обязательный пункт контроля центровки в чек-лист запуска", measurable: "100% запусков резервных насосов имеют подписанный чек-лист", achievable: "Владелец процесса — технический надзор", relevant: "Устраняет пропуск контрольной операции", timeBound: "В течение 7 календарных дней" },
+        { priority: "P2", specific: "Настроить предупреждение по тренду вибрации", measurable: "Тревога формируется при достижении 6 мм/с", achievable: "Силами АСУ ТП", relevant: "Позволяет обнаружить деградацию до аварийного останова", timeBound: "В течение 30 дней" },
       ],
       confidence: 78,
       openQuestions: ["Есть ли протокол лазерной центровки после последней замены?", "Как изменился спектр вибрации перед остановом?"],
@@ -132,6 +130,20 @@ const makeId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toSt
 
 function formatNow() {
   return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date());
+}
+
+function normalizeRcaResult(result: any): RcaResult {
+  if (Array.isArray(result.smartActions)) return result as RcaResult;
+  return {
+    executiveSummary: result.executiveSummary ?? "Рабочая гипотеза сформирована по доступным материалам.",
+    physicalCause: result.immediateCause ?? "Физическая причина не была выделена в старом формате отчёта.",
+    humanFactor: Array.isArray(result.contributingFactors) ? result.contributingFactors.join("; ") : "Человеческий фактор требует уточнения по первичным данным.",
+    systemicCause: result.rootCause ?? "Системная причина не была выделена в старом формате отчёта.",
+    smartActions: Array.isArray(result.recommendations) ? result.recommendations.map((item: any) => ({ priority: item.priority ?? "P1", specific: item.action ?? "Уточнить корректирующее действие", measurable: "Зафиксировать измеримый результат в протоколе", achievable: item.owner ?? "Ответственный владелец процесса", relevant: "Связано с устранением причины отказа", timeBound: item.horizon ?? "Согласовать срок" })) : [],
+    confidence: Number(result.confidence ?? 0),
+    openQuestions: Array.isArray(result.openQuestions) ? result.openQuestions : [],
+    methodNotes: result.methodNotes ?? "Требуется проверка ответственным специалистом.",
+  };
 }
 
 async function toDataUrl(uri: string, mimeType = "image/jpeg") {
@@ -193,7 +205,7 @@ export default function HomeScreen() {
         try {
           const parsed = JSON.parse(raw) as PumpCase[];
           if (parsed.length > 0) {
-            const normalized = parsed.map((item) => ({ ...item, tags: item.tags?.length ? item.tags : item.id === "demo-1" ? ["вибрация", "подшипник", "центровка"] : item.id === "demo-2" ? ["подача", "всасывание", "шлам"] : [], chatHistory: item.chatHistory ?? [], evidence: item.evidence.map((entry) => ({ ...entry, annotations: entry.annotations ?? [] })) }));
+            const normalized = parsed.map((item) => ({ ...item, tags: item.tags?.length ? item.tags : item.id === "demo-1" ? ["вибрация", "подшипник", "центровка"] : item.id === "demo-2" ? ["подача", "всасывание", "шлам"] : [], chatHistory: item.chatHistory ?? [], result: item.result ? normalizeRcaResult(item.result) : undefined, evidence: item.evidence.map((entry) => ({ ...entry, annotations: entry.annotations ?? [] })) }));
             setCases(normalized);
             setSelectedId(normalized[0].id);
           }
@@ -215,6 +227,20 @@ export default function HomeScreen() {
   const filteredCases = useMemo(() => cases.filter((item) => matchesCaseFilters(item, searchQuery, activeTag, activeStatus)), [activeStatus, activeTag, cases, searchQuery]);
 
   const updateCase = (next: PumpCase) => setCases((current) => current.map((item) => item.id === next.id ? next : item));
+
+  const confirmDeleteCase = (item: PumpCase) => {
+    Alert.alert("Удалить расследование?", "Вы уверены, что хотите удалить это расследование? Это действие нельзя отменить.", [
+      { text: "Отмена", style: "cancel" },
+      { text: "Удалить", style: "destructive", onPress: () => {
+        const remaining = removeCaseById(cases, item.id);
+        setCases(remaining);
+        setSelectedId(remaining[0]?.id ?? "");
+        setSearchQuery("");
+        setActiveTag("Все");
+        setActiveStatus("Все");
+      } },
+    ]);
+  };
 
   const addEvidence = (item: Evidence) => {
     setDraftEvidence((current) => [...current, item]);
@@ -390,7 +416,7 @@ export default function HomeScreen() {
     }
   };
 
-  if (!selectedCase) return null;
+  if (!selectedCase) return <ScreenContainer containerClassName="bg-background" edges={["top", "left", "right"]}><View style={[styles.header, { borderBottomColor: colors.border }]}><View><Text style={[styles.eyebrow, { color: colors.primary }]}>PUMPRCA / FIELD MODE</Text><Text style={[styles.title, { color: colors.foreground }]}>Расследования отказов</Text></View></View><View style={styles.emptyState}><Icon name="folder-open" size={42} color={colors.muted} /><Text style={[styles.emptyStateTitle, { color: colors.foreground }]}>Расследований пока нет</Text><Text style={[styles.emptyStateText, { color: colors.muted }]}>Создайте новое расследование, чтобы собрать материалы и запустить RCA-анализ.</Text><Pressable onPress={openNewCase} style={[styles.createButton, { backgroundColor: colors.primary, paddingHorizontal: 20 }]}><Icon name="add" size={20} color="#FFFFFF" /><Text style={styles.createButtonText}>Новое расследование</Text></Pressable></View></ScreenContainer>;
 
   return (
     <ScreenContainer containerClassName="bg-background" edges={["top", "left", "right"]}>
@@ -436,7 +462,7 @@ export default function HomeScreen() {
           <View style={styles.detailHeader}><View style={{ flex: 1 }}><Text style={[styles.detailEyebrow, { color: colors.primary }]}>АКТИВНЫЙ КЕЙС</Text><Text style={[styles.detailTitle, { color: colors.foreground }]}>{selectedCase.title}</Text></View><Pill background={selectedCase.severity === "Высокий" ? "#FFF0EC" : "#FFF3DD"} color={selectedCase.severity === "Высокий" ? "#C94D32" : "#A56600"}>{selectedCase.severity}</Pill></View>
           <Text style={[styles.detailNarrative, { color: colors.muted }]}>{selectedCase.narrative}</Text>
           <View style={styles.factGrid}><View><Text style={[styles.factLabel, { color: colors.muted }]}>Оборудование</Text><Text style={[styles.factValue, { color: colors.foreground }]}>{selectedCase.equipmentType}</Text></View><View><Text style={[styles.factLabel, { color: colors.muted }]}>Локация</Text><Text style={[styles.factValue, { color: colors.foreground }]}>{selectedCase.location}</Text></View></View>
-          <View style={styles.detailActions}><ActionButton label="Добавить данные" icon="add-photo-alternate" onPress={() => openEvidenceEditor(selectedCase)} colors={colors} /><ActionButton label={isAnalyzing ? "Анализирую…" : "Запустить RCA"} icon={isAnalyzing ? "hourglass-top" : "auto-awesome"} onPress={() => analyzeCase(selectedCase)} colors={colors} primary={selectedCase.evidence.length > 0} disabled={isAnalyzing} /></View>
+          <View style={styles.detailActions}><ActionButton label="Добавить данные" icon="add-photo-alternate" onPress={() => openEvidenceEditor(selectedCase)} colors={colors} /><ActionButton label={isAnalyzing ? "Анализирую…" : "Запустить RCA"} icon={isAnalyzing ? "hourglass-top" : "auto-awesome"} onPress={() => analyzeCase(selectedCase)} colors={colors} primary={selectedCase.evidence.length > 0} disabled={isAnalyzing} /><Pressable onPress={() => confirmDeleteCase(selectedCase)} style={({ pressed }) => [styles.deleteButton, { borderColor: colors.error, opacity: pressed ? 0.72 : 1 }]}><Icon name="delete-outline" size={18} color={colors.error} /><Text style={[styles.deleteButtonText, { color: colors.error }]}>Удалить</Text></Pressable></View>
         </View>
 
         <View style={styles.sectionHeader}><View><Text style={[styles.sectionTitle, { color: colors.foreground }]}>Материалы расследования</Text><Text style={[styles.sectionSubtitle, { color: colors.muted }]}>{selectedCase.evidence.length} источника в кейсе</Text></View><Icon name="folder-open" size={22} color={colors.muted} /></View>
@@ -482,8 +508,21 @@ function EvidenceButton({ label, icon, onPress, colors }: { label: string; icon:
 
 function RcaSummary({ result, colors, onExport, isExporting, chatContext, onHistoryChange }: { result: RcaResult; colors: ReturnType<typeof useColors>; onExport: () => void; isExporting: boolean; chatContext: RcaChatContext; onHistoryChange: (history: RcaChatMessage[]) => void }) {
   const confidenceBand = getConfidenceBand(result.confidence);
-  const confidenceLabel = confidenceBand === "high" ? "высокая" : confidenceBand === "medium" ? "средняя" : "низкая";
-  return <View style={styles.resultStack}><View style={[styles.rcaCard, { backgroundColor: colors.foreground }]}><View style={styles.rcaHeader}><View><Text style={styles.rcaEyebrow}>AI RCA / ВЫВОДЫ</Text><Text style={styles.rcaTitle}>Гипотеза корневой причины</Text></View><View style={styles.confidence}><Text style={styles.confidenceNumber}>{result.confidence}%</Text><Text style={styles.confidenceLabel}>{confidenceLabel} уверенность</Text></View></View><Text style={styles.rcaSummaryText}>{result.executiveSummary}</Text><View style={styles.rootCauseBlock}><Text style={styles.rootCauseLabel}>ROOT CAUSE</Text><Text style={styles.rootCauseText}>{result.rootCause}</Text></View><View style={styles.timeline}>{result.eventChain.slice(0, 5).map((event, index) => <View key={`${event}-${index}`} style={styles.timelineRow}><View style={styles.timelineDot}><Text style={styles.timelineIndex}>{index + 1}</Text></View><Text style={styles.timelineText}>{event}</Text></View>)}</View><Text style={styles.subsectionLabel}>Следующие действия</Text>{result.recommendations.slice(0, 3).map((recommendation) => <View key={recommendation.action} style={styles.recommendation}><View style={styles.recommendationBadge}><Text style={styles.recommendationBadgeText}>{recommendation.priority}</Text></View><View style={{ flex: 1 }}><Text style={styles.recommendationAction}>{recommendation.action}</Text><Text style={styles.recommendationMeta}>{recommendation.owner} · {recommendation.horizon}</Text></View></View>)}<View style={styles.openQuestions}><Icon name="help-outline" size={19} color="#F7B08E" /><Text style={styles.openQuestionsText}>{result.openQuestions.length} открытых вопроса требуют проверки на месте</Text></View><Pressable disabled={isExporting} onPress={onExport} style={({ pressed }) => [styles.pdfButton, { opacity: isExporting ? 0.55 : pressed ? 0.8 : 1 }]}><Icon name={isExporting ? "hourglass-top" : "picture-as-pdf"} size={18} color="#FFFFFF" /><Text style={styles.pdfButtonText}>{isExporting ? "Формирую PDF…" : "Экспортировать RCA в PDF"}</Text></Pressable></View><RcaChat key={chatContext.caseTitle} context={chatContext} onHistoryChange={onHistoryChange} /></View>;
+  const confidenceLabel = confidenceBand === "high" ? "High" : confidenceBand === "medium" ? "Medium" : "Low";
+  const blocks = [
+    { number: "1", label: "Физическая причина", value: result.physicalCause },
+    { number: "2", label: "Человеческий фактор", value: result.humanFactor },
+    { number: "3", label: "Системная причина", value: result.systemicCause },
+  ];
+  return <View style={styles.resultStack}>
+    <View style={[styles.rcaCard, { backgroundColor: "#1E1E1E" }]}>
+      <View style={styles.rcaHeader}><View><Text style={styles.rcaEyebrow}>AI RCA / ВЫВОДЫ</Text><Text style={styles.rcaTitle}>Структурированный анализ</Text></View><View style={styles.confidence}><Text style={styles.confidenceNumber}>{result.confidence}%</Text><Text style={styles.confidenceLabel}>{confidenceLabel}</Text></View></View>
+      <Text style={styles.rcaSummaryText}>{result.executiveSummary}</Text>
+      {blocks.map((block) => <View key={block.number} style={styles.analysisBlock}><View style={styles.blockHeading}><View style={styles.blockNumber}><Text style={styles.blockNumberText}>{block.number}</Text></View><Text style={styles.blockTitle}>{block.label}</Text></View><Text style={styles.blockText}>{block.value}</Text></View>)}
+      <View style={styles.analysisBlock}><View style={styles.blockHeading}><View style={styles.blockNumber}><Text style={styles.blockNumberText}>4</Text></View><Text style={styles.blockTitle}>Мероприятия по SMART</Text></View>{result.smartActions.map((action, index) => <View key={`${action.priority}-${index}`} style={styles.smartAction}><View style={styles.smartTop}><Text style={styles.recommendationBadgeText}>{action.priority}</Text><Text style={styles.smartActionTitle}>{action.specific}</Text></View><Text style={styles.smartLine}><Text style={styles.smartKey}>S</Text> {action.specific}</Text><Text style={styles.smartLine}><Text style={styles.smartKey}>M</Text> {action.measurable}</Text><Text style={styles.smartLine}><Text style={styles.smartKey}>A</Text> {action.achievable}</Text><Text style={styles.smartLine}><Text style={styles.smartKey}>R</Text> {action.relevant}</Text><Text style={styles.smartLine}><Text style={styles.smartKey}>T</Text> {action.timeBound}</Text></View>)}</View>
+      <View style={styles.openQuestions}><Icon name="help-outline" size={19} color="#F7B08E" /><Text style={styles.openQuestionsText}>{result.openQuestions.length} открытых вопроса требуют проверки на месте</Text></View><Pressable disabled={isExporting} onPress={onExport} style={({ pressed }) => [styles.pdfButton, { opacity: isExporting ? 0.55 : pressed ? 0.8 : 1 }]}><Icon name={isExporting ? "hourglass-top" : "picture-as-pdf"} size={18} color="#FFFFFF" /><Text style={styles.pdfButtonText}>{isExporting ? "Формирую PDF…" : "Экспортировать RCA в PDF"}</Text></Pressable>
+    </View><RcaChat key={chatContext.caseTitle} context={chatContext} onHistoryChange={onHistoryChange} />
+  </View>;
 }
 
 const styles = StyleSheet.create({
@@ -569,6 +608,19 @@ const styles = StyleSheet.create({
   openQuestionsText: { color: "#F7B08E", fontSize: 11, fontWeight: "700" },
   pdfButton: { minHeight: 45, borderRadius: 12, backgroundColor: "#F2673A", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   pdfButtonText: { color: "#FFFFFF", fontSize: 12, fontWeight: "800" },
+  deleteButton: { minHeight: 44, borderRadius: 13, borderWidth: 1, paddingHorizontal: 10, flexDirection: "row", gap: 5, alignItems: "center", justifyContent: "center" },
+  deleteButtonText: { fontSize: 11, fontWeight: "800" },
+  analysisBlock: { borderTopWidth: 1, borderTopColor: "#3A3A3A", paddingTop: 13, gap: 7 },
+  blockHeading: { flexDirection: "row", alignItems: "center", gap: 8 },
+  blockNumber: { width: 24, height: 24, borderRadius: 12, backgroundColor: "#F2673A", alignItems: "center", justifyContent: "center" },
+  blockNumberText: { color: "#FFFFFF", fontSize: 11, fontWeight: "800" },
+  blockTitle: { color: "#FFFFFF", fontSize: 14, fontWeight: "800" },
+  blockText: { color: "#F2F4F5", fontSize: 13, lineHeight: 20 },
+  smartAction: { backgroundColor: "#2A2A2A", borderRadius: 10, padding: 11, gap: 5 },
+  smartTop: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  smartActionTitle: { color: "#FFFFFF", fontSize: 12, lineHeight: 17, fontWeight: "700", flex: 1 },
+  smartLine: { color: "#E5E7E9", fontSize: 11, lineHeight: 16 },
+  smartKey: { color: "#F7B08E", fontWeight: "800" },
   resultStack: { gap: 12 },
   modal: { flex: 1 },
   modalHeader: { padding: 20, paddingTop: Platform.OS === "ios" ? 18 : 26, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#E6E8EB" },
@@ -600,4 +652,7 @@ const styles = StyleSheet.create({
   annotateDraft: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "#FFF0EC" },
   createButton: { minHeight: 51, borderRadius: 15, marginTop: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   createButtonText: { color: "#FFFFFF", fontSize: 14, fontWeight: "800" },
+  emptyState: { flex: 1, alignItems: "center", justifyContent: "center", padding: 28, gap: 10 },
+  emptyStateTitle: { fontSize: 20, fontWeight: "800", textAlign: "center" },
+  emptyStateText: { fontSize: 13, lineHeight: 19, textAlign: "center", maxWidth: 360 },
 });
