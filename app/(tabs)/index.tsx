@@ -31,6 +31,8 @@ import { trpc } from "@/lib/trpc";
 import { getConfidenceBand, matchesCaseFilters, removeCaseById, type PhotoAnnotation } from "@/shared/rca";
 import { buildRcaReportHtml } from "@/shared/report";
 import type { RcaChatContext, RcaChatMessage } from "@/shared/chat";
+import { makeAiCacheKey } from "@/shared/ai";
+import { readAiCache, readAiUsage, recordAiUsage, writeAiCache } from "@/lib/ai-cache";
 
 const STORAGE_KEY = "pumprca.cases.v1";
 
@@ -359,6 +361,17 @@ export default function HomeScreen() {
   const analyzeCase = async (item: PumpCase) => {
     setIsAnalyzing(true);
     try {
+      const cacheKey = makeAiCacheKey("rca", { title: item.title, equipmentType: item.equipmentType, assetTag: item.assetTag, location: item.location, narrative: item.narrative, evidence: item.evidence.map((entry) => ({ kind: entry.kind, name: entry.name, uri: entry.uri, note: entry.note, annotations: entry.annotations })) });
+      const cachedResult = await readAiCache<RcaResult>(cacheKey);
+      if (cachedResult) {
+        updateCase({ ...item, result: cachedResult, status: "Готово", updatedAt: formatNow() });
+        const usage = await readAiUsage();
+        await recordAiUsage({ cacheHits: usage.cacheHits + 1 });
+        Alert.alert("RCA из кэша", "Для этого набора данных уже есть сохранённый результат. Новый AI-вызов не выполнялся.");
+        return;
+      }
+      const usage = await readAiUsage();
+      await recordAiUsage({ cacheMisses: usage.cacheMisses + 1, rcaCalls: usage.rcaCalls + 1 });
       const payloadEvidence = await Promise.all(item.evidence.map(async (entry) => {
         let imageData: string | undefined;
         if (entry.kind === "photo" && entry.uri) imageData = await toDataUrl(entry.uri, entry.mimeType);
@@ -374,6 +387,7 @@ export default function HomeScreen() {
         return { kind: entry.kind, name: entry.name, note: [entry.note, annotationNote].filter(Boolean).join(". "), imageData };
       }));
       const result = await rcaMutation.mutateAsync({ caseTitle: item.title, equipmentType: item.equipmentType, assetTag: item.assetTag, location: item.location, narrative: item.narrative, evidence: payloadEvidence });
+      await writeAiCache(cacheKey, result);
       updateCase({ ...item, result, status: "Готово", chatHistory: [], updatedAt: formatNow() });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
       Alert.alert("RCA готов", "Выводы сформированы. Проверьте гипотезы и открытые вопросы перед выпуском отчёта.");

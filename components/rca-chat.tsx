@@ -5,6 +5,8 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import { useColors } from "@/hooks/use-colors";
 import { trpc } from "@/lib/trpc";
 import type { RcaChatContext, RcaChatMessage } from "@/shared/chat";
+import { makeAiCacheKey } from "@/shared/ai";
+import { readAiCache, readAiUsage, recordAiUsage, writeAiCache } from "@/lib/ai-cache";
 
 type RcaChatProps = { context: RcaChatContext; onHistoryChange: (history: RcaChatMessage[]) => void };
 
@@ -33,7 +35,20 @@ export function RcaChat({ context, onHistoryChange }: RcaChatProps) {
     onHistoryChange(nextMessages);
     setQuestion("");
     try {
+      const cacheKey = makeAiCacheKey("chat", { context, question: trimmed });
+      const cachedAnswer = await readAiCache<string>(cacheKey);
+      if (cachedAnswer) {
+        const usage = await readAiUsage();
+        const completedMessages = [...nextMessages, { role: "assistant" as const, content: cachedAnswer }];
+        setMessages(completedMessages);
+        onHistoryChange(completedMessages);
+        await recordAiUsage({ cacheHits: usage.cacheHits + 1 });
+        return;
+      }
+      const usage = await readAiUsage();
+      await recordAiUsage({ cacheMisses: usage.cacheMisses + 1, chatCalls: usage.chatCalls + 1 });
       const response = await chatMutation.mutateAsync({ ...context, history: messages, question: trimmed });
+      await writeAiCache(cacheKey, response.answer);
       const completedMessages = [...nextMessages, { role: "assistant" as const, content: response.answer }];
       setMessages(completedMessages);
       onHistoryChange(completedMessages);

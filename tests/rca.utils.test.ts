@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { formatRcaEvidence, getConfidenceBand, hasActionableRca, matchesCaseFilters, removeCaseById } from "../shared/rca";
 import { buildRcaChatPrompt } from "../shared/chat";
 import { buildRcaReportHtml } from "../shared/report";
+import { makeAiCacheKey, stableSerialize } from "../shared/ai";
 
 describe("RCA utilities", () => {
   it("maps confidence to an interpretable band", () => {
@@ -89,5 +90,11 @@ describe("RCA utilities", () => {
   it("removes only the requested investigation", () => {
     const remaining = removeCaseById([{ id: "a" }, { id: "b" }, { id: "c" }], "b");
     expect(remaining.map((item) => item.id)).toEqual(["a", "c"]);
+  });
+
+  it("creates the same cache key regardless of object key order", () => {
+    expect(stableSerialize({ b: 2, a: 1 })).toBe(stableSerialize({ a: 1, b: 2 }));
+    expect(makeAiCacheKey("rca", { b: 2, a: 1 })).toBe(makeAiCacheKey("rca", { a: 1, b: 2 }));
+    expect(makeAiCacheKey("rca", { a: 1 })).not.toBe(makeAiCacheKey("chat", { a: 1 }));
   });
 });
