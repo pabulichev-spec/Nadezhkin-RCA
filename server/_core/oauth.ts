@@ -1,8 +1,24 @@
 import { COOKIE_NAME, ONE_YEAR_MS } from "../../shared/const.js";
 import type { Express, Request, Response } from "express";
-import { getUserByOpenId, upsertUser } from "../db";
+import { getUserByOpenId, incrementUserSessionVersion, upsertUser } from "../db";
+import { ENV } from "./env";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
+
+function upstreamStatus(error: unknown) {
+  const response = (error as { response?: { status?: unknown } } | null)?.response;
+  return typeof response?.status === "number" ? response.status : undefined;
+}
+
+function oauthFailureResponse(res: Response, error: unknown, operation: string) {
+  const status = upstreamStatus(error);
+  const httpStatus = status && status >= 500 && status <= 599 ? 502 : 500;
+  console.error("[OAuth] upstream failure", { operation, upstreamStatus: status, httpStatus });
+  res.status(httpStatus).json({
+    error: httpStatus === 502 ? "OAuth provider temporarily unavailable" : "OAuth exchange failed",
+    code: httpStatus === 502 ? "OAUTH_UPSTREAM_UNAVAILABLE" : "OAUTH_EXCHANGE_FAILED",
+  });
+}
 
 function getQueryParam(req: Request, key: string): string | undefined {
   const value = req.query[key];
@@ -21,12 +37,18 @@ async function syncUser(userInfo: {
   }
 
   const lastSignedIn = new Date();
+  const existing = await getUserByOpenId(userInfo.openId);
   await upsertUser({
     openId: userInfo.openId,
     name: userInfo.name || null,
     email: userInfo.email ?? null,
     loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
     lastSignedIn,
+    ...(existing
+      ? {}
+      : userInfo.openId === ENV.ownerOpenId
+        ? { role: "admin" as const, status: "active" as const }
+        : { status: "pending" as const }),
   });
   const saved = await getUserByOpenId(userInfo.openId);
   return (
@@ -34,8 +56,10 @@ async function syncUser(userInfo: {
       openId: userInfo.openId,
       name: userInfo.name,
       email: userInfo.email,
-      loginMethod: userInfo.loginMethod ?? null,
-      lastSignedIn,
+        loginMethod: userInfo.loginMethod ?? null,
+        status: "pending",
+        sessionVersion: 1,
+        lastSignedIn,
     }
   );
 }
@@ -53,11 +77,11 @@ function buildUserResponse(
 ) {
   return {
     id: (user as any)?.id ?? null,
-    openId: user?.openId ?? null,
     name: user?.name ?? null,
     email: user?.email ?? null,
     loginMethod: user?.loginMethod ?? null,
     lastSignedIn: (user?.lastSignedIn ?? new Date()).toISOString(),
+    status: (user as any)?.status ?? "pending",
   };
 }
 
@@ -74,9 +98,10 @@ export function registerOAuthRoutes(app: Express) {
     try {
       const tokenResponse = await sdk.exchangeCodeForToken(code, state);
       const userInfo = await sdk.getUserInfo(tokenResponse.accessToken);
-      await syncUser(userInfo);
+      const user = await syncUser(userInfo);
       const sessionToken = await sdk.createSessionToken(userInfo.openId!, {
         name: userInfo.name || "",
+        sessionVersion: user.sessionVersion,
         expiresInMs: ONE_YEAR_MS,
       });
 
@@ -91,8 +116,7 @@ export function registerOAuthRoutes(app: Express) {
         "http://localhost:8081";
       res.redirect(302, frontendUrl);
     } catch (error) {
-      console.error("[OAuth] Callback failed", error);
-      res.status(500).json({ error: "OAuth callback failed" });
+      oauthFailureResponse(res, error, "web_callback");
     }
   });
 
@@ -112,6 +136,7 @@ export function registerOAuthRoutes(app: Express) {
 
       const sessionToken = await sdk.createSessionToken(userInfo.openId!, {
         name: userInfo.name || "",
+        sessionVersion: user.sessionVersion,
         expiresInMs: ONE_YEAR_MS,
       });
 
@@ -123,15 +148,22 @@ export function registerOAuthRoutes(app: Express) {
         user: buildUserResponse(user),
       });
     } catch (error) {
-      console.error("[OAuth] Mobile exchange failed", error);
-      res.status(500).json({ error: "OAuth mobile exchange failed" });
+      oauthFailureResponse(res, error, "mobile_exchange");
     }
   });
 
   app.post("/api/auth/logout", (req: Request, res: Response) => {
-    const cookieOptions = getSessionCookieOptions(req);
-    res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-    res.json({ success: true });
+    void (async () => {
+      try {
+        const user = await sdk.authenticateRequest(req);
+        await incrementUserSessionVersion(user.id);
+      } catch {
+        // Logout remains idempotent even for an expired/revoked session.
+      }
+      const cookieOptions = getSessionCookieOptions(req);
+      res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      res.json({ success: true });
+    })();
   });
 
   // Get current authenticated user - works with both cookie (web) and Bearer token (mobile)
