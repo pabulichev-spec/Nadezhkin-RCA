@@ -317,13 +317,6 @@ class SDKServer {
       throw ForbiddenError("User not found");
     }
 
-    if (session.sessionVersion !== user.sessionVersion) {
-      throw ForbiddenError("Session revoked");
-    }
-    if (user.status !== "active") {
-      throw ForbiddenError(user.status === "disabled" ? "User disabled" : "User pending approval");
-    }
-
     await db.upsertUser({
       openId: user.openId,
       lastSignedIn: signedInAt,

@@ -1,6 +1,6 @@
 import { COOKIE_NAME, ONE_YEAR_MS } from "../../shared/const.js";
 import type { Express, Request, Response } from "express";
-import { getUserByOpenId, incrementUserSessionVersion, upsertUser } from "../db";
+import { getUserByOpenId, upsertUser } from "../db";
 import { ENV } from "./env";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
@@ -44,11 +44,7 @@ async function syncUser(userInfo: {
     email: userInfo.email ?? null,
     loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
     lastSignedIn,
-    ...(existing
-      ? {}
-      : userInfo.openId === ENV.ownerOpenId
-        ? { role: "admin" as const, status: "active" as const }
-        : { status: "pending" as const }),
+    ...(existing ? {} : userInfo.openId === ENV.ownerOpenId ? { role: "admin" as const } : {}),
   });
   const saved = await getUserByOpenId(userInfo.openId);
   return (
@@ -57,8 +53,6 @@ async function syncUser(userInfo: {
       name: userInfo.name,
       email: userInfo.email,
         loginMethod: userInfo.loginMethod ?? null,
-        status: "pending",
-        sessionVersion: 1,
         lastSignedIn,
     }
   );
@@ -101,7 +95,6 @@ export function registerOAuthRoutes(app: Express) {
       const user = await syncUser(userInfo);
       const sessionToken = await sdk.createSessionToken(userInfo.openId!, {
         name: userInfo.name || "",
-        sessionVersion: user.sessionVersion,
         expiresInMs: ONE_YEAR_MS,
       });
 
@@ -136,7 +129,6 @@ export function registerOAuthRoutes(app: Express) {
 
       const sessionToken = await sdk.createSessionToken(userInfo.openId!, {
         name: userInfo.name || "",
-        sessionVersion: user.sessionVersion,
         expiresInMs: ONE_YEAR_MS,
       });
 
@@ -155,8 +147,7 @@ export function registerOAuthRoutes(app: Express) {
   app.post("/api/auth/logout", (req: Request, res: Response) => {
     void (async () => {
       try {
-        const user = await sdk.authenticateRequest(req);
-        await incrementUserSessionVersion(user.id);
+        await sdk.authenticateRequest(req);
       } catch {
         // Logout remains idempotent even for an expired/revoked session.
       }
