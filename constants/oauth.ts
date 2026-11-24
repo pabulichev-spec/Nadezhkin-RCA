@@ -7,13 +7,19 @@ const bundleId = "com.app.pumprcamobile";
 const timestamp = bundleId.split(".").pop()?.replace(/^t/, "") ?? "";
 const schemeFromBundleId = `manus${timestamp}`;
 
+// Native Release builds must not depend on a preview URL or on the build machine's
+// environment. These are public routing/application identifiers, not secrets.
+const PRODUCTION_API_BASE_URL = "https://pump-rca-ntbesymu.manus.space";
+const PRODUCTION_OAUTH_PORTAL_URL = "https://manus.im";
+const PRODUCTION_APP_ID = "NTbesYmutW98MNF43huUkd";
+
 const env = {
-  portal: process.env.EXPO_PUBLIC_OAUTH_PORTAL_URL ?? "",
+  portal: process.env.EXPO_PUBLIC_OAUTH_PORTAL_URL ?? PRODUCTION_OAUTH_PORTAL_URL,
   server: process.env.EXPO_PUBLIC_OAUTH_SERVER_URL ?? "",
-  appId: process.env.EXPO_PUBLIC_APP_ID ?? "",
+  appId: process.env.EXPO_PUBLIC_APP_ID ?? PRODUCTION_APP_ID,
   ownerId: process.env.EXPO_PUBLIC_OWNER_OPEN_ID ?? "",
   ownerName: process.env.EXPO_PUBLIC_OWNER_NAME ?? "",
-  apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL ?? "",
+  apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL ?? PRODUCTION_API_BASE_URL,
   deepLinkScheme: schemeFromBundleId,
 };
 
@@ -30,7 +36,12 @@ export const API_BASE_URL = env.apiBaseUrl;
  * URL pattern: https://PORT-sandboxid.region.domain
  */
 export function getApiBaseUrl(): string {
-  // If API_BASE_URL is set, use it
+  // Native Release must always use the stable production backend. A preview URL
+  // is only appropriate for web development and must never be baked into a APK.
+  if (ReactNative.Platform.OS !== "web") {
+    return PRODUCTION_API_BASE_URL;
+  }
+
   if (API_BASE_URL) {
     return API_BASE_URL.replace(/\/$/, "");
   }

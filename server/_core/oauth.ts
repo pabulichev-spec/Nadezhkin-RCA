@@ -12,11 +12,22 @@ function upstreamStatus(error: unknown) {
 
 function oauthFailureResponse(res: Response, error: unknown, operation: string) {
   const status = upstreamStatus(error);
-  const httpStatus = status && status >= 500 && status <= 599 ? 502 : 500;
+  const isProviderUnavailable = status !== undefined && status >= 500 && status <= 599;
+  const isProviderRejection = status !== undefined && status >= 400 && status < 500;
+  const httpStatus = isProviderUnavailable ? 502 : isProviderRejection ? 400 : 500;
   console.error("[OAuth] upstream failure", { operation, upstreamStatus: status, httpStatus });
   res.status(httpStatus).json({
-    error: httpStatus === 502 ? "OAuth provider temporarily unavailable" : "OAuth exchange failed",
-    code: httpStatus === 502 ? "OAUTH_UPSTREAM_UNAVAILABLE" : "OAUTH_EXCHANGE_FAILED",
+    error: isProviderUnavailable
+      ? "OAuth provider temporarily unavailable"
+      : isProviderRejection
+        ? "OAuth provider rejected the authorization request"
+        : "OAuth exchange failed",
+    code: isProviderUnavailable
+      ? "OAUTH_UPSTREAM_UNAVAILABLE"
+      : isProviderRejection
+        ? "OAUTH_PROVIDER_REJECTED"
+        : "OAUTH_EXCHANGE_FAILED",
+    operation,
   });
 }
 
@@ -123,9 +134,29 @@ export function registerOAuthRoutes(app: Express) {
     }
 
     try {
-      const tokenResponse = await sdk.exchangeCodeForToken(code, state);
-      const userInfo = await sdk.getUserInfo(tokenResponse.accessToken);
-      const user = await syncUser(userInfo);
+      let tokenResponse;
+      try {
+        tokenResponse = await sdk.exchangeCodeForToken(code, state);
+      } catch (error) {
+        oauthFailureResponse(res, error, "exchange_token");
+        return;
+      }
+
+      let userInfo;
+      try {
+        userInfo = await sdk.getUserInfo(tokenResponse.accessToken);
+      } catch (error) {
+        oauthFailureResponse(res, error, "get_user_info");
+        return;
+      }
+
+      let user;
+      try {
+        user = await syncUser(userInfo);
+      } catch (error) {
+        oauthFailureResponse(res, error, "sync_user");
+        return;
+      }
 
       const sessionToken = await sdk.createSessionToken(userInfo.openId!, {
         name: userInfo.name || "",
@@ -140,7 +171,7 @@ export function registerOAuthRoutes(app: Express) {
         user: buildUserResponse(user),
       });
     } catch (error) {
-      oauthFailureResponse(res, error, "mobile_exchange");
+      oauthFailureResponse(res, error, "create_session");
     }
   });
 

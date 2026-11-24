@@ -22,9 +22,9 @@ export default function OAuthCallback() {
   useEffect(() => {
     const handleCallback = async () => {
       console.log("[OAuth] Callback handler triggered");
-      console.log("[OAuth] Params received:", {
-        code: params.code,
-        state: params.state,
+      console.log("[OAuth] callback:received", {
+        hasCode: !!params.code,
+        hasState: !!params.state,
         error: params.error,
         sessionToken: params.sessionToken ? "present" : "missing",
         user: params.user ? "present" : "missing",
@@ -118,9 +118,9 @@ export default function OAuthCallback() {
             code = urlObj.searchParams.get("code");
             state = urlObj.searchParams.get("state");
             sessionToken = urlObj.searchParams.get("sessionToken");
-            console.log("[OAuth] Extracted from URL:", {
-              code: code?.substring(0, 20) + "...",
-              state: state?.substring(0, 20) + "...",
+            console.log("[OAuth] callback:parsed", {
+              hasCode: !!code,
+              hasState: !!state,
               sessionToken: sessionToken ? "present" : "missing",
             });
           } catch (e) {
@@ -134,9 +134,9 @@ export default function OAuthCallback() {
                 if (key === "state") state = decodeURIComponent(value);
                 if (key === "sessionToken") sessionToken = decodeURIComponent(value);
               });
-              console.log("[OAuth] Extracted from regex:", {
-                code: code?.substring(0, 20) + "...",
-                state: state?.substring(0, 20) + "...",
+              console.log("[OAuth] callback:parsed", {
+                hasCode: !!code,
+                hasState: !!state,
                 sessionToken: sessionToken ? "present" : "missing",
               });
             }
@@ -176,9 +176,10 @@ export default function OAuthCallback() {
         }
 
         // Exchange code for session token
-        console.log("[OAuth] Exchanging code for session token...", {
-          code: code.substring(0, 20) + "...",
-          state: state.substring(0, 20) + "...",
+        console.log("[OAuth] mobile_exchange:attempt", {
+          endpoint: "/api/oauth/mobile",
+          hasCode: true,
+          hasState: true,
         });
         const result = await Api.exchangeOAuthCode(code, state);
         console.log("[OAuth] Exchange result:", {
@@ -223,7 +224,10 @@ export default function OAuthCallback() {
           setErrorMessage("No session token received");
         }
       } catch (error) {
-        console.error("[OAuth] Callback error:", error);
+          console.error("[OAuth] mobile_exchange:failure", {
+            errorType: error instanceof Error ? error.name : "unknown",
+            message: error instanceof Error ? error.message : "unknown",
+          });
         setStatus("error");
         setErrorMessage(
           error instanceof Error ? error.message : "Failed to complete authentication",
