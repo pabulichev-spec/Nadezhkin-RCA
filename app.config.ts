@@ -28,8 +28,8 @@ const schemeFromBundleId = `manus${timestamp}`;
 
 const env = {
   // App branding - update these values directly (do not use env vars)
-  appName: "PumpRCA — расследования отказов насосов",
-  appSlug: "pump-rca-mobile",
+  appName: "Надёжкин",
+  appSlug: "nadezhkin",
   // S3 URL of the app logo - set this to the URL returned by generate_image when creating custom logo
   // Leave empty to use the default icon from assets/images/icon.png
   logoUrl: "",
@@ -41,7 +41,7 @@ const env = {
 const config: ExpoConfig = {
   name: env.appName,
   slug: env.appSlug,
-  version: "1.0.7",
+  version: "1.0.8",
   orientation: "portrait",
   icon: "./assets/images/icon.png",
   scheme: env.scheme,
@@ -55,7 +55,7 @@ const config: ExpoConfig = {
       }
   },
   android: {
-    versionCode: 8,
+    versionCode: 9,
     adaptiveIcon: {
       backgroundColor: "#E6F4FE",
       foregroundImage: "./assets/images/android-icon-foreground.png",
@@ -90,8 +90,8 @@ const config: ExpoConfig = {
     [
       "expo-image-picker",
       {
-        photosPermission: "Разрешите PumpRCA использовать фото для расследования отказов.",
-        cameraPermission: "Разрешите PumpRCA использовать камеру для фиксации оборудования.",
+        photosPermission: "Разрешите Надёжкину использовать фото для расследования отказов.",
+        cameraPermission: "Разрешите Надёжкину использовать камеру для фиксации оборудования.",
       },
     ],
     "expo-document-picker",

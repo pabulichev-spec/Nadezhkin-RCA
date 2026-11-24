@@ -9,7 +9,7 @@ Workflow: `.github/workflows/android-release.yml`
 3. Устанавливает зависимости через `pnpm install --frozen-lockfile`.
 4. Генерирует native-проект командой `expo prebuild --platform android --clean --no-install`, потому что каталог `android/` намеренно исключён из Git.
 5. Собирает `arm64-v8a` и `armeabi-v7a` Release APK с production defaults из приложения.
-6. Проверяет package name `com.app.pumprcamobile`, version `1.0.7`, versionCode `8`, наличие production API URL в JS bundle и считает SHA-256.
+6. Проверяет package name `com.app.pumprcamobile`, application label `Надёжкин`, version `1.0.8`, versionCode `9`, наличие production API URL в JS bundle и считает SHA-256.
 7. Публикует APK, badging и SHA-256 как GitHub Actions artifact на 30 дней.
 
 ## Подпись APK

@@ -500,16 +500,16 @@ export default function HomeScreen() {
     }
   };
 
-  if (!selectedCase) return <ScreenContainer containerClassName="bg-background" edges={["top", "left", "right"]}><View style={[styles.header, { borderBottomColor: colors.border }]}><View><Text style={[styles.eyebrow, { color: colors.primary }]}>PUMPRCA / FIELD MODE</Text><Text style={[styles.title, { color: colors.foreground }]}>Расследования отказов</Text></View></View><View style={styles.emptyState}><Icon name="folder-open" size={42} color={colors.muted} /><Text style={[styles.emptyStateTitle, { color: colors.foreground }]}>Расследований пока нет</Text><Text style={[styles.emptyStateText, { color: colors.muted }]}>Создайте новое расследование, чтобы собрать материалы и запустить RCA-анализ.</Text><Pressable onPress={openNewCase} style={[styles.createButton, { backgroundColor: colors.primary, paddingHorizontal: 20 }]}><Icon name="add" size={20} color="#FFFFFF" /><Text style={styles.createButtonText}>Новое расследование</Text></Pressable></View></ScreenContainer>;
+  if (!selectedCase) return <ScreenContainer containerClassName="bg-background" edges={["top", "left", "right"]}><View style={[styles.header, { borderBottomColor: colors.border }]}><View><Text style={[styles.eyebrow, { color: colors.primary }]}>НАДЁЖКИН / FIELD MODE</Text><Text style={[styles.title, { color: colors.foreground }]}>Расследования отказов</Text></View></View><View style={styles.emptyState}><Icon name="folder-open" size={42} color={colors.muted} /><Text style={[styles.emptyStateTitle, { color: colors.foreground }]}>Расследований пока нет</Text><Text style={[styles.emptyStateText, { color: colors.muted }]}>Создайте новое расследование, чтобы собрать материалы и запустить RCA-анализ.</Text><Pressable onPress={openNewCase} style={[styles.createButton, { backgroundColor: colors.primary, paddingHorizontal: 20 }]}><Icon name="add" size={20} color="#FFFFFF" /><Text style={styles.createButtonText}>Новое расследование</Text></Pressable></View></ScreenContainer>;
 
   return (
     <ScreenContainer containerClassName="bg-background" edges={["top", "left", "right"]}>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <View>
-          <Text style={[styles.eyebrow, { color: colors.primary }]}>PUMPRCA / FIELD MODE</Text>
+          <Text style={[styles.eyebrow, { color: colors.primary }]}>НАДЁЖКИН / FIELD MODE</Text>
           <Text style={[styles.title, { color: colors.foreground }]}>Расследования отказов</Text>
         </View>
-        <Pressable onPress={() => Alert.alert("PumpRCA", "Собирайте свидетельства на месте, а затем запускайте RCA-анализ по цепочке событий и барьерам.")} style={({ pressed }) => [styles.infoButton, { backgroundColor: colors.surface, opacity: pressed ? 0.7 : 1 }]}>
+        <Pressable onPress={() => Alert.alert("Надёжкин", "Собирайте свидетельства на месте, а затем запускайте RCA-анализ по цепочке событий и барьерам.")} style={({ pressed }) => [styles.infoButton, { backgroundColor: colors.surface, opacity: pressed ? 0.7 : 1 }]}>
           <Icon name="info-outline" size={20} color={colors.primary} />
         </Pressable>
       </View>
