@@ -52,7 +52,7 @@ describe("RCA utilities", () => {
     expect(html).toContain("Системная причина");
     expect(html).toContain("SMART");
     expect(html).toContain("след перегрева");
-    expect(html).toContain("PUMPRCA / RCA REPORT");
+    expect(html).toContain("НАДЁЖКИН / RCA REPORT");
   });
 
   it("filters cases by query, tag and status", () => {

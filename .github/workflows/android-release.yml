@@ -126,6 +126,10 @@ jobs:
             echo 'Production API URL was not found in the embedded JS bundle.' >&2
             exit 1
           fi
+          if unzip -p "$APK" assets/index.android.bundle 2>/dev/null | grep -aEq 'PumpRCA|PUMPRCA'; then
+            echo 'Legacy PumpRCA branding was found in the embedded JS bundle.' >&2
+            exit 1
+          fi
           sha256sum "$APK" | tee apk-sha256.txt
 
       - name: Upload APK and verification files
