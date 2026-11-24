@@ -21,13 +21,12 @@ export default function OAuthCallback() {
 
   useEffect(() => {
     const handleCallback = async () => {
-      console.log("[OAuth] Callback handler triggered");
       console.log("[OAuth] callback:received", {
         hasCode: !!params.code,
         hasState: !!params.state,
-        error: params.error,
-        sessionToken: params.sessionToken ? "present" : "missing",
-        user: params.user ? "present" : "missing",
+        hasError: !!params.error,
+        hasSessionToken: !!params.sessionToken,
+        hasUser: !!params.user,
       });
       try {
         // Check for sessionToken in params first (web OAuth callback from server redirect)
@@ -53,7 +52,7 @@ export default function OAuthCallback() {
                 lastSignedIn: new Date(userData.lastSignedIn || Date.now()),
               };
               await Auth.setUserInfo(userInfo);
-              console.log("[OAuth] User info stored:", userInfo);
+              console.log("[OAuth] User info stored", { hasUser: true });
             } catch (err) {
               console.error("[OAuth] Failed to parse user data:", err);
             }
@@ -79,12 +78,12 @@ export default function OAuthCallback() {
           if (params.state) urlParams.set("state", params.state);
           if (params.error) urlParams.set("error", params.error);
           url = `?${urlParams.toString()}`;
-          console.log("[OAuth] Constructed URL from params:", url);
+          console.log("[OAuth] Constructed callback query", { hasCode: !!params.code, hasState: !!params.state, hasError: !!params.error });
         } else {
           console.log("[OAuth] No params found, checking Linking.getInitialURL()...");
           // Fallback: try to get from Linking
           const initialUrl = await Linking.getInitialURL();
-          console.log("[OAuth] Linking.getInitialURL():", initialUrl);
+          console.log("[OAuth] Linking.getInitialURL", { present: !!initialUrl });
           if (initialUrl) {
             url = initialUrl;
           }
@@ -111,7 +110,7 @@ export default function OAuthCallback() {
           code = params.code;
           state = params.state;
         } else if (url) {
-          console.log("[OAuth] Parsing code and state from URL:", url);
+          console.log("[OAuth] Parsing callback URL", { present: true });
           // Parse from URL
           try {
             const urlObj = new URL(url);
@@ -124,7 +123,7 @@ export default function OAuthCallback() {
               sessionToken: sessionToken ? "present" : "missing",
             });
           } catch (e) {
-            console.log("[OAuth] Failed to parse as full URL, trying regex:", e);
+            console.log("[OAuth] Failed to parse callback URL, trying fallback parser");
             // Try parsing as relative URL with query params
             const match = url.match(/[?&](code|state|sessionToken)=([^&]+)/g);
             if (match) {
@@ -195,7 +194,7 @@ export default function OAuthCallback() {
 
           // Store user info if available
           if (result.user) {
-            console.log("[OAuth] User data received:", result.user);
+            console.log("[OAuth] User data received", { present: true });
             const userInfo: Auth.User = {
               id: result.user.id,
               openId: result.user.openId,
@@ -205,7 +204,7 @@ export default function OAuthCallback() {
               lastSignedIn: new Date(result.user.lastSignedIn || Date.now()),
             };
             await Auth.setUserInfo(userInfo);
-            console.log("[OAuth] User info stored:", userInfo);
+            console.log("[OAuth] User info stored", { hasUser: true });
           } else {
             console.log("[OAuth] No user data in result");
           }
@@ -219,7 +218,7 @@ export default function OAuthCallback() {
             router.replace("/(tabs)");
           }, 1000);
         } else {
-          console.error("[OAuth] No session token in result:", result);
+          console.error("[OAuth] No session token in exchange result", { hasUser: !!result.user });
           setStatus("error");
           setErrorMessage("No session token received");
         }

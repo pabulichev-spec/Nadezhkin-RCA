@@ -36,6 +36,7 @@ import type { RcaChatContext, RcaChatMessage } from "@/shared/chat";
 import { makeAiCacheKey } from "@/shared/ai";
 import { filterEquipmentTypes, isKnownEquipmentType } from "@/shared/equipment";
 import { readAiCache, readAiUsage, recordAiUsage, writeAiCache } from "@/lib/ai-cache";
+import { startOAuthLogin } from "@/constants/oauth";
 
 const STORAGE_KEY = "pumprca.cases.v1";
 
@@ -514,6 +515,13 @@ export default function HomeScreen() {
     navigateToCases();
     openNewCase();
   };
+  const startManusLogin = async () => {
+    try {
+      await startOAuthLogin();
+    } catch {
+      Alert.alert("Не удалось открыть вход", "Проверьте подключение к интернету и повторите вход через Manus.");
+    }
+  };
 
   const renderTopBar = () => (
     <View style={styles.dashboardTopBar}>
@@ -590,7 +598,7 @@ export default function HomeScreen() {
   if (activeTab === "profile") return (
     <ScreenContainer style={styles.dashboardRoot} containerClassName="bg-background" edges={["top", "left", "right", "bottom"]}>
       {renderTopBar()}
-      <ScrollView contentContainerStyle={styles.dashboardContent}><Text style={styles.dashboardEyebrow}>ПРОФИЛЬ</Text><Text style={styles.dashboardTitle}>Рабочее пространство</Text><Text style={styles.dashboardSubtitle}>Авторизация Manus и синхронизация данных Надёжкина.</Text><View style={styles.dashboardPanel}><View style={styles.profileRow}><Icon name="account-circle" size={48} color="#6EB9F2" /><View style={{ flex: 1 }}><Text style={styles.panelTitle}>Пользователь Manus</Text><Text style={styles.panelHint}>Состояние авторизации и доступ к данным</Text></View><View style={styles.onlineBadge}><View style={styles.onlineDot} /><Text style={styles.onlineText}>ОНЛАЙН</Text></View></View></View><Pressable onPress={() => Alert.alert("Авторизация", "Вход и синхронизация выполняются через Manus OAuth.")} style={styles.secondaryDashboardButton}><Icon name="vpn-key" size={21} color="#6EB9F2" /><Text style={styles.secondaryDashboardButtonText}>Проверить авторизацию Manus</Text></Pressable></ScrollView>{renderMenu()}{renderBottomNav()}
+      <ScrollView contentContainerStyle={styles.dashboardContent}><Text style={styles.dashboardEyebrow}>ПРОФИЛЬ</Text><Text style={styles.dashboardTitle}>Рабочее пространство</Text><Text style={styles.dashboardSubtitle}>Авторизация Manus и синхронизация данных Надёжкина.</Text><View style={styles.dashboardPanel}><View style={styles.profileRow}><Icon name="account-circle" size={48} color="#6EB9F2" /><View style={{ flex: 1 }}><Text style={styles.panelTitle}>Пользователь Manus</Text><Text style={styles.panelHint}>Состояние авторизации и доступ к данным</Text></View><View style={styles.onlineBadge}><View style={styles.onlineDot} /><Text style={styles.onlineText}>ОНЛАЙН</Text></View></View></View><Pressable onPress={startManusLogin} style={({ pressed }) => [styles.secondaryDashboardButton, pressed && { opacity: 0.78 }]}><Icon name="vpn-key" size={21} color="#6EB9F2" /><Text style={styles.secondaryDashboardButtonText}>Войти через Manus</Text></Pressable></ScrollView>{renderMenu()}{renderBottomNav()}
     </ScreenContainer>
   );
 
