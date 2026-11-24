@@ -1,5 +1,7 @@
 import * as Linking from "expo-linking";
 import * as ReactNative from "react-native";
+import { resolveApiBaseUrl } from "@/lib/api-url";
+import { API_BASE_URL as PLATFORM_API_BASE_URL } from "./oauth-api";
 
 // Extract scheme from bundle ID (last segment timestamp, prefixed with "manus")
 // e.g., "space.manus.my.app.t20240115103045" -> "manus20240115103045"
@@ -7,28 +9,19 @@ const bundleId = "com.app.pumprcamobile";
 const timestamp = bundleId.split(".").pop()?.replace(/^t/, "") ?? "";
 const schemeFromBundleId = `manus${timestamp}`;
 
-// Native Release builds must not depend on a preview URL or on the build machine's
-// environment. These are public routing/application identifiers, not secrets.
-const PRODUCTION_API_BASE_URL = "https://pump-rca-ntbesymu.manus.space";
-const PRODUCTION_OAUTH_PORTAL_URL = "https://manus.im";
-const PRODUCTION_APP_ID = "NTbesYmutW98MNF43huUkd";
-
 const env = {
-  portal: process.env.EXPO_PUBLIC_OAUTH_PORTAL_URL ?? PRODUCTION_OAUTH_PORTAL_URL,
+  portal: process.env.EXPO_PUBLIC_OAUTH_PORTAL_URL ?? "https://manus.im",
   server: process.env.EXPO_PUBLIC_OAUTH_SERVER_URL ?? "",
-  appId: process.env.EXPO_PUBLIC_APP_ID ?? PRODUCTION_APP_ID,
-  ownerId: process.env.EXPO_PUBLIC_OWNER_OPEN_ID ?? "",
-  ownerName: process.env.EXPO_PUBLIC_OWNER_NAME ?? "",
-  apiBaseUrl: process.env.EXPO_PUBLIC_API_BASE_URL ?? PRODUCTION_API_BASE_URL,
+  appId: process.env.EXPO_PUBLIC_APP_ID ?? "NTbesYmutW98MNF43huUkd",
   deepLinkScheme: schemeFromBundleId,
 };
 
 export const OAUTH_PORTAL_URL = env.portal;
 export const OAUTH_SERVER_URL = env.server;
 export const APP_ID = env.appId;
-export const OWNER_OPEN_ID = env.ownerId;
-export const OWNER_NAME = env.ownerName;
-export const API_BASE_URL = env.apiBaseUrl;
+export const API_BASE_URL = PLATFORM_API_BASE_URL;
+
+export { resolveApiBaseUrl } from "@/lib/api-url";
 
 /**
  * Get the API base URL, deriving from current hostname if not set.
@@ -36,28 +29,12 @@ export const API_BASE_URL = env.apiBaseUrl;
  * URL pattern: https://PORT-sandboxid.region.domain
  */
 export function getApiBaseUrl(): string {
-  // Native Release must always use the stable production backend. A preview URL
-  // is only appropriate for web development and must never be baked into a APK.
-  if (ReactNative.Platform.OS !== "web") {
-    return PRODUCTION_API_BASE_URL;
-  }
-
-  if (API_BASE_URL) {
-    return API_BASE_URL.replace(/\/$/, "");
-  }
-
-  // On web, derive from current hostname by replacing port 8081 with 3000
-  if (ReactNative.Platform.OS === "web" && typeof window !== "undefined" && window.location) {
-    const { protocol, hostname } = window.location;
-    // Pattern: 8081-sandboxid.region.domain -> 3000-sandboxid.region.domain
-    const apiHostname = hostname.replace(/^8081-/, "3000-");
-    if (apiHostname !== hostname) {
-      return `${protocol}//${apiHostname}`;
-    }
-  }
-
-  // Fallback to empty (will use relative URL)
-  return "";
+  return resolveApiBaseUrl({
+    platform: ReactNative.Platform.OS === "web" ? "web" : "native",
+    configured: API_BASE_URL,
+    protocol: typeof window !== "undefined" ? window.location?.protocol : undefined,
+    hostname: typeof window !== "undefined" ? window.location?.hostname : undefined,
+  });
 }
 
 export const SESSION_TOKEN_KEY = "app_session_token";
@@ -124,14 +101,10 @@ export async function startOAuthLogin(): Promise<string | null> {
   }
 
   try {
-    // HTTPS is handled by the system browser. canOpenURL is unreliable on
-    // Android when the browser package is not declared in the manifest.
     await Linking.openURL(loginUrl);
   } catch (error) {
-    console.error("[OAuth] Failed to open login URL", {
-      type: error instanceof Error ? error.name : "unknown",
-    });
-    throw error;
+    console.error("[OAuth] Failed to open login URL:", error);
+    // 可考虑抛出错误让调用方处理
   }
 
   // The OAuth callback will reopen the app via deep link.

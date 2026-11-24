@@ -1,7 +1,6 @@
-import { eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users } from "../drizzle/schema";
-import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -55,9 +54,14 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     if (user.role !== undefined) {
       values.role = user.role;
       updateSet.role = user.role;
-    } else if (user.openId === ENV.ownerOpenId) {
-      values.role = "admin";
-      updateSet.role = "admin";
+    }
+    if (user.status !== undefined) {
+      values.status = user.status;
+      updateSet.status = user.status;
+    }
+    if (user.sessionVersion !== undefined) {
+      values.sessionVersion = user.sessionVersion;
+      updateSet.sessionVersion = user.sessionVersion;
     }
 
     if (!values.lastSignedIn) {
@@ -87,6 +91,52 @@ export async function getUserByOpenId(openId: string) {
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
 
   return result.length > 0 ? result[0] : undefined;
+}
+
+export async function incrementUserSessionVersion(userId: number): Promise<void> {
+  if (userId <= 0) return;
+  const db = await getDb();
+  if (!db) throw new Error("Database is required to revoke sessions");
+  await db
+    .update(users)
+    .set({ sessionVersion: sql`${users.sessionVersion} + 1` })
+    .where(eq(users.id, userId));
+}
+
+export async function listUsers() {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for admin user management");
+  return db
+    .select({
+      id: users.id,
+      openId: users.openId,
+      name: users.name,
+      email: users.email,
+      role: users.role,
+      status: users.status,
+      createdAt: users.createdAt,
+      lastSignedIn: users.lastSignedIn,
+    })
+    .from(users)
+    .orderBy(asc(users.createdAt));
+}
+
+export async function setUserStatus(userId: number, status: "pending" | "active" | "disabled") {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for admin user management");
+  await db
+    .update(users)
+    .set({ status, sessionVersion: sql`${users.sessionVersion} + 1` })
+    .where(eq(users.id, userId));
+}
+
+export async function setUserRole(userId: number, role: "user" | "admin") {
+  const db = await getDb();
+  if (!db) throw new Error("Database is required for admin user management");
+  await db
+    .update(users)
+    .set({ role, sessionVersion: sql`${users.sessionVersion} + 1` })
+    .where(eq(users.id, userId));
 }
 
 // TODO: add feature queries here as your schema grows.

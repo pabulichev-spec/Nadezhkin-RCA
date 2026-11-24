@@ -13,6 +13,10 @@ export const EMPTY_AI_USAGE: AiUsageStats = {
   cacheMisses: 0,
 };
 
+export const RCA_CACHE_SCHEMA_VERSION = 2 as const;
+export const RCA_CACHE_PROMPT_VERSION = 2 as const;
+export const RCA_CACHE_VALIDATOR_VERSION = 3 as const;
+
 export function stableSerialize(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(stableSerialize).join(",")}]`;

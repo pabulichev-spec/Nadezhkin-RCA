@@ -38,9 +38,9 @@ yarn-error.*
 
 app-example
 
-# generated native folders
+# iOS remains generated; Android contains the custom offline JNI/CMake runtime.
+# android/.gitignore excludes Gradle/CMake outputs and local.properties.
 /ios
-/android
 
 # IDE
 .vscode/

@@ -1,14 +1,17 @@
-import { useEffect, useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useEffect, useMemo, useState } from "react";
+import { FlatList, Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 
 import { useColors } from "@/hooks/use-colors";
-import { trpc } from "@/lib/trpc";
 import type { RcaChatContext, RcaChatMessage } from "@/shared/chat";
 import { makeAiCacheKey } from "@/shared/ai";
 import { readAiCache, readAiUsage, recordAiUsage, writeAiCache } from "@/lib/ai-cache";
+import { createTRPCClient } from "@/lib/trpc";
+import { canUseRemoteRca, NATIVE_RCA_UNAVAILABLE_MESSAGE } from "@/lib/rca-routing";
+import * as Auth from "@/lib/_core/auth";
+import { startOAuthLogin } from "@/constants/oauth";
 
-type RcaChatProps = { context: RcaChatContext; onHistoryChange: (history: RcaChatMessage[]) => void };
+type RcaChatProps = { context: RcaChatContext; qwen3ModelPath?: string; investigationId?: string; onHistoryChange: (history: RcaChatMessage[]) => void };
 
 const starters = [
   "Почему это считается корневой причиной?",
@@ -16,11 +19,12 @@ const starters = [
   "Какая рекомендация имеет наивысший приоритет?",
 ];
 
-export function RcaChat({ context, onHistoryChange }: RcaChatProps) {
+export function RcaChat({ context, qwen3ModelPath, investigationId, onHistoryChange }: RcaChatProps) {
   const colors = useColors();
+  const trpcClient = useMemo(() => createTRPCClient(), []);
   const [messages, setMessages] = useState<RcaChatMessage[]>(context.history.length > 0 ? context.history : [{ role: "assistant", content: "Я готов уточнить логику RCA, объяснить связь фактов с гипотезой или подсказать, какие проверки закрывают открытые вопросы." }]);
   const [question, setQuestion] = useState("");
-  const chatMutation = trpc.rca.ask.useMutation();
+  const [isPending, setIsPending] = useState(false);
 
   useEffect(() => {
     setMessages(context.history.length > 0 ? context.history : [{ role: "assistant", content: "Я готов уточнить логику RCA, объяснить связь фактов с гипотезой или подсказать, какие проверки закрывают открытые вопросы." }]);
@@ -28,12 +32,13 @@ export function RcaChat({ context, onHistoryChange }: RcaChatProps) {
 
   const sendQuestion = async (value = question) => {
     const trimmed = value.trim();
-    if (!trimmed || chatMutation.isPending) return;
+    if (!trimmed || isPending) return;
     const userMessage: RcaChatMessage = { role: "user", content: trimmed };
     const nextMessages = [...messages, userMessage];
     setMessages(nextMessages);
     onHistoryChange(nextMessages);
     setQuestion("");
+    setIsPending(true);
     try {
       const cacheKey = makeAiCacheKey("chat", { context, question: trimmed });
       const cachedAnswer = await readAiCache<string>(cacheKey);
@@ -45,24 +50,51 @@ export function RcaChat({ context, onHistoryChange }: RcaChatProps) {
         await recordAiUsage({ cacheHits: usage.cacheHits + 1 });
         return;
       }
+      if (Platform.OS !== "web" && !(await Auth.getSessionToken())) {
+        const completedMessages = [...nextMessages, { role: "assistant" as const, content: "Для серверного AI-чата сначала войдите в рабочее пространство. Локальные данные сохранены." }];
+        setMessages(completedMessages);
+        onHistoryChange(completedMessages);
+        await startOAuthLogin();
+        return;
+      }
+      if (!canUseRemoteRca(Platform.OS === "web" ? "web" : "native")) {
+        const completedMessages = [...nextMessages, { role: "assistant" as const, content: NATIVE_RCA_UNAVAILABLE_MESSAGE }];
+        setMessages(completedMessages);
+        onHistoryChange(completedMessages);
+        return;
+      }
       const usage = await readAiUsage();
       await recordAiUsage({ cacheMisses: usage.cacheMisses + 1, chatCalls: usage.chatCalls + 1 });
-      const response = await chatMutation.mutateAsync({ ...context, history: messages, question: trimmed });
-      await writeAiCache(cacheKey, response.answer);
-      const completedMessages = [...nextMessages, { role: "assistant" as const, content: response.answer }];
+      const response = await trpcClient.rca.ask.mutate({
+        investigationId,
+        caseTitle: context.caseTitle,
+        equipmentType: context.equipmentType,
+        assetTag: context.assetTag,
+        location: context.location,
+        narrative: context.narrative,
+        result: context.result,
+        evidence: context.evidence,
+        history: context.history,
+        question: trimmed,
+      });
+      const answer = response.answer;
+      await writeAiCache(cacheKey, answer);
+      const completedMessages = [...nextMessages, { role: "assistant" as const, content: answer }];
       setMessages(completedMessages);
       onHistoryChange(completedMessages);
     } catch {
-      const failedMessages = [...nextMessages, { role: "assistant" as const, content: "Не удалось получить ответ сейчас. Проверьте соединение и повторите вопрос — сам отчёт RCA сохранён." }];
+      const failedMessages = [...nextMessages, { role: "assistant" as const, content: "Бесплатная web AI-модель временно недоступна. Расследование и история чата сохранены; повторите позже." }];
       setMessages(failedMessages);
       onHistoryChange(failedMessages);
+    } finally {
+      setIsPending(false);
     }
   };
 
   return (
     <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <View style={styles.header}>
-        <View style={[styles.iconWrap, { backgroundColor: "#FFF0EC" }]}><MaterialIcons name="forum" size={19} color={colors.primary} /></View>
+        <View style={[styles.iconWrap, { backgroundColor: "#102E5A" }]}><MaterialIcons name="forum" size={19} color={colors.primary} /></View>
         <View style={{ flex: 1 }}><Text style={[styles.eyebrow, { color: colors.primary }]}>AI RCA DIALOGUE</Text><Text style={[styles.title, { color: colors.foreground }]}>Уточнить вывод</Text></View>
         <View style={[styles.contextBadge, { backgroundColor: colors.background }]}><Text style={[styles.contextText, { color: colors.muted }]}>контекст кейса</Text></View>
       </View>
@@ -76,9 +108,9 @@ export function RcaChat({ context, onHistoryChange }: RcaChatProps) {
       />
 
       <Text style={[styles.promptLabel, { color: colors.muted }]}>Быстрые вопросы</Text>
-      <View style={styles.starters}>{starters.map((starter) => <Pressable key={starter} onPress={() => sendQuestion(starter)} disabled={chatMutation.isPending} style={({ pressed }) => [styles.starter, { borderColor: colors.border, opacity: chatMutation.isPending ? 0.5 : pressed ? 0.7 : 1 }]}><Text numberOfLines={1} style={[styles.starterText, { color: colors.foreground }]}>{starter}</Text></Pressable>)}</View>
+      <View style={styles.starters}>{starters.map((starter) => <Pressable key={starter} onPress={() => sendQuestion(starter)} disabled={isPending} style={({ pressed }) => [styles.starter, { borderColor: colors.border, opacity: isPending ? 0.5 : pressed ? 0.7 : 1 }]}><Text numberOfLines={1} style={[styles.starterText, { color: colors.foreground }]}>{starter}</Text></Pressable>)}</View>
 
-      <View style={[styles.composer, { borderColor: colors.border, backgroundColor: colors.background }]}><TextInput value={question} onChangeText={setQuestion} onSubmitEditing={() => sendQuestion()} placeholder="Задайте вопрос по RCA…" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.foreground }]} multiline maxLength={2000} editable={!chatMutation.isPending} /><Pressable onPress={() => sendQuestion()} disabled={chatMutation.isPending || !question.trim()} style={({ pressed }) => [styles.send, { backgroundColor: colors.primary, opacity: chatMutation.isPending || !question.trim() ? 0.45 : pressed ? 0.8 : 1 }]}><MaterialIcons name={chatMutation.isPending ? "hourglass-top" : "arrow-upward"} size={19} color="#FFFFFF" /></Pressable></View>
+      <View style={[styles.composer, { borderColor: colors.border, backgroundColor: colors.background }]}><TextInput value={question} onChangeText={setQuestion} onSubmitEditing={() => sendQuestion()} placeholder="Задайте вопрос по RCA…" placeholderTextColor={colors.muted} style={[styles.input, { color: colors.foreground }]} multiline maxLength={2000} editable={!isPending} /><Pressable onPress={() => sendQuestion()} disabled={isPending || !question.trim()} style={({ pressed }) => [styles.send, { backgroundColor: colors.primary, opacity: isPending || !question.trim() ? 0.45 : pressed ? 0.8 : 1 }]}><MaterialIcons name={isPending ? "hourglass-top" : "arrow-upward"} size={19} color="#FFFFFF" /></Pressable></View>
       <Text style={[styles.disclaimer, { color: colors.muted }]}>Чат уточняет рабочую гипотезу и не заменяет проверку инженером.</Text>
     </View>
   );

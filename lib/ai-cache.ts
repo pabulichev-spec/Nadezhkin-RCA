@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { EMPTY_AI_USAGE, mergeAiUsage, type AiUsageStats } from "@/shared/ai";
+import { EMPTY_AI_USAGE, mergeAiUsage, type AiUsageStats } from "../shared/ai";
 
 const USAGE_KEY = "pumprca.ai.usage.v1";
 const CACHE_TTL_KEY = "pumprca.ai.cache-ttl-days.v1";
@@ -33,7 +33,12 @@ export async function readAiCache<T>(key: string): Promise<T | undefined> {
   try {
     const raw = await AsyncStorage.getItem(key);
     if (!raw) return undefined;
-    const entry = JSON.parse(raw) as CacheEnvelope<T>;
+    const parsed = JSON.parse(raw) as Partial<CacheEnvelope<T>>;
+    if (!parsed || typeof parsed !== "object" || typeof parsed.createdAt !== "number" || !("value" in parsed)) {
+      await removeAiCache(key);
+      return undefined;
+    }
+    const entry = parsed as CacheEnvelope<T>;
     const ttlMs = (await getCacheTtlDays()) * 24 * 60 * 60 * 1000;
     if (!entry.createdAt || Date.now() - entry.createdAt > ttlMs) {
       await AsyncStorage.removeItem(key);
@@ -41,6 +46,7 @@ export async function readAiCache<T>(key: string): Promise<T | undefined> {
     }
     return entry.value;
   } catch {
+    await removeAiCache(key);
     return undefined;
   }
 }
@@ -50,6 +56,14 @@ export async function writeAiCache<T>(key: string, value: T) {
     await AsyncStorage.setItem(key, JSON.stringify({ createdAt: Date.now(), value } satisfies CacheEnvelope<T>));
   } catch {
     // Caching must never block an analysis.
+  }
+}
+
+export async function removeAiCache(key: string) {
+  try {
+    await AsyncStorage.removeItem(key);
+  } catch {
+    // Cache invalidation is best effort and must never block the analysis flow.
   }
 }
 

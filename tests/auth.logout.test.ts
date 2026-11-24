@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { vi } from "vitest";
 import { appRouter } from "../server/routers";
+import * as db from "../server/db";
 import { COOKIE_NAME } from "../shared/const";
 import type { TrpcContext } from "../server/_core/context";
 
@@ -14,12 +16,14 @@ function createAuthContext(): { ctx: TrpcContext; clearedCookies: CookieCall[] }
   const clearedCookies: CookieCall[] = [];
   
   const user: AuthenticatedUser = {
-    id: 1,
+    id: 42,
     openId: "sample-user",
     email: "sample@example.com",
     name: "Sample User",
     loginMethod: "manus",
     role: "user",
+    status: "active",
+    sessionVersion: 1,
     createdAt: new Date(),
     updatedAt: new Date(),
     lastSignedIn: new Date(),
@@ -41,9 +45,9 @@ function createAuthContext(): { ctx: TrpcContext; clearedCookies: CookieCall[] }
   return { ctx, clearedCookies };
 }
 
-// TODO: Remove `.skip` below once you implement user authentication
-describe.skip("auth.logout", () => {
+describe("auth.logout", () => {
   it("clears the session cookie and reports success", async () => {
+    const revokeSpy = vi.spyOn(db, "incrementUserSessionVersion").mockResolvedValueOnce();
     const { ctx, clearedCookies } = createAuthContext();
     const caller = appRouter.createCaller(ctx);
 
@@ -55,9 +59,11 @@ describe.skip("auth.logout", () => {
     expect(clearedCookies[0]?.options).toMatchObject({
       maxAge: -1,
       secure: true,
-      sameSite: "none",
+      sameSite: "lax",
       httpOnly: true,
       path: "/",
     });
+    expect(revokeSpy).toHaveBeenCalledWith(42);
+    revokeSpy.mockRestore();
   });
 });

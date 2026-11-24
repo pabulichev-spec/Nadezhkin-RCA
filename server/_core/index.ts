@@ -2,11 +2,15 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
+import path from "path";
+import fs from "fs";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
+import { applyCors, ensureCsrfCookie, hasValidCsrf, isStateChanging } from "./security";
+import { assertProductionSecurityConfig } from "./env";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -28,27 +32,24 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  assertProductionSecurityConfig();
   const app = express();
   const server = createServer(app);
 
-  // Enable CORS for all routes - reflect the request origin to support credentials
   app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    if (origin) {
-      res.header("Access-Control-Allow-Origin", origin);
+    if (!applyCors(req, res)) {
+      res.status(403).json({ error: "Origin not allowed" });
+      return;
     }
-    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.header(
-      "Access-Control-Allow-Headers",
-      "Origin, X-Requested-With, Content-Type, Accept, Authorization",
-    );
-    res.header("Access-Control-Allow-Credentials", "true");
-
-    // Handle preflight requests
     if (req.method === "OPTIONS") {
       res.sendStatus(200);
       return;
     }
+    if (isStateChanging(req) && !hasValidCsrf(req)) {
+      res.status(403).json({ error: "CSRF validation failed" });
+      return;
+    }
+    ensureCsrfCookie(req, res);
     next();
   });
 
@@ -69,6 +70,20 @@ async function startServer() {
       createContext,
     }),
   );
+
+  // The mobile-app template previously deployed only the API server. In production,
+  // serve the Expo static export from the same origin so /api/* remains server-owned.
+  const webDist = path.resolve(process.cwd(), "dist-web");
+  if (fs.existsSync(path.join(webDist, "index.html"))) {
+    app.use(express.static(webDist, { index: "index.html" }));
+    app.get("*", (req, res, next) => {
+      if (req.path.startsWith("/api/") || req.path.startsWith("/manus-storage/")) {
+        next();
+        return;
+      }
+      res.sendFile(path.join(webDist, "index.html"));
+    });
+  }
 
   const preferredPort = parseInt(process.env.PORT || "3000");
   const port = await findAvailablePort(preferredPort);

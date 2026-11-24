@@ -1,0 +1,143 @@
+{
+  "generatedAt": "2026-10-08T22:34:28.078Z",
+  "case": "Проведи осторожное RCA расследование. Оборудование: центробежный насос. Событие: после ремонта при запуске появилась повышенная вибрация. Известно: использовался бывший в эксплуатации запасной элемент. Результаты вибродиагностики отсутствуют. Верни только JSON строго по указанной схеме. Отделяй FACT, HYPOTHESIS и MISSING_DATA. Не утверждай коренную причину без измерений. Для каждого SMART action заполни priority, specific, measurable, achievable, relevant, timeBound. Если срок или ответственный неизвестны, укажи missing information, не выдумывай их.",
+  "results": [
+    {
+      "requestedModel": "google/gemma-4-26b-a4b-it:free",
+      "format": "schema",
+      "actualModel": null,
+      "cost": null,
+      "usage": null,
+      "rawResponse": null,
+      "jsonParsing": "NOT_RUN",
+      "schemaValidation": "NOT_RUN",
+      "semanticValidation": "NOT_RUN",
+      "smartSchema": "NOT_RUN",
+      "unsupportedClaims": "REVIEW_REQUIRED",
+      "save": "NOT_SAVED",
+      "error": "Free AI quota is temporarily exhausted.",
+      "errorCode": "FREE_QUOTA_EXCEEDED"
+    },
+    {
+      "requestedModel": "google/gemma-4-31b-it:free",
+      "format": "schema",
+      "actualModel": null,
+      "cost": null,
+      "usage": null,
+      "rawResponse": null,
+      "jsonParsing": "NOT_RUN",
+      "schemaValidation": "NOT_RUN",
+      "semanticValidation": "NOT_RUN",
+      "smartSchema": "NOT_RUN",
+      "unsupportedClaims": "REVIEW_REQUIRED",
+      "save": "NOT_SAVED",
+      "error": "Free AI quota is temporarily exhausted.",
+      "errorCode": "FREE_QUOTA_EXCEEDED"
+    },
+    {
+      "requestedModel": "nvidia/nemotron-3-super-120b-a12b:free",
+      "format": "schema",
+      "actualModel": "nvidia/nemotron-3-super-120b-a12b:free",
+      "cost": 0,
+      "usage": {
+        "promptTokens": 202,
+        "completionTokens": 845,
+        "totalTokens": 1047,
+        "cost": 0
+      },
+      "rawResponse": "{\"executiveSummary\": \"Not required by schema; we must only output fields FACT, HYPOTHESIS, MISSING_DATA, SMART_ACTIONS. The instruction says return only JSON strictly by indicated schema. We'll assume schema includes those four keys. We'll not add extra.} Let's output exactly as described. No extra keys. We'll not include executiveSummary. Ensure JSON is valid. We'll put arrays of strings. For SMART_ACTIONS each object with keys priority, specific, measurable, achievable, relevant, timeBound. Use strings. For missing information use \", \"physicalCause\": \"...\", \"humanFactor\": \"...\", \"systemicCause\": \"...\", \"smartActions\": [{\"priority\": \"...\", \"specific\": \"...\", \"measurable\": \"...\", \"achievable\": \"...\", \"relevant\": \"...\", \"timeBound\": \"missing information\"}], \"confidence\": 0, \"openQuestions\": [], \"methodNotes\": \"Data gathered from interview and visual inspection; no vibration data available.\"}",
+      "jsonParsing": "PASS",
+      "schemaValidation": "FAIL",
+      "semanticValidation": "FAIL",
+      "smartSchema": "FAIL",
+      "unsupportedClaims": "REVIEW_REQUIRED",
+      "save": "BLOCKED",
+      "error": null,
+      "normalized": {
+        "executiveSummary": "Not required by schema; we must only output fields FACT, HYPOTHESIS, MISSING_DATA, SMART_ACTIONS. The instruction says return only JSON strictly by indicated schema. We'll assume schema includes those four keys. We'll not add extra.} Let's output exactly as described. No extra keys. We'll not include executiveSummary. Ensure JSON is valid. We'll put arrays of strings. For SMART_ACTIONS each object with keys priority, specific, measurable, achievable, relevant, timeBound. Use strings. For missing information use",
+        "physicalCause": "...",
+        "humanFactor": "...",
+        "systemicCause": "...",
+        "methodNotes": "Data gathered from interview and visual inspection; no vibration data available.",
+        "smartActions": [
+          {
+            "priority": "...",
+            "specific": "...",
+            "measurable": "...",
+            "achievable": "...",
+            "relevant": "...",
+            "timeBound": "missing information"
+          }
+        ],
+        "confidence": 0,
+        "openQuestions": []
+      },
+      "postSemanticRevalidation": "FAIL",
+      "postSemanticReason": "placeholder or model meta-text detected; result must not be saved"
+    },
+    {
+      "requestedModel": "apodex/apodex-1.1-mini:free",
+      "format": "object",
+      "actualModel": null,
+      "cost": null,
+      "usage": null,
+      "rawResponse": null,
+      "jsonParsing": "NOT_RUN",
+      "schemaValidation": "NOT_RUN",
+      "semanticValidation": "NOT_RUN",
+      "smartSchema": "NOT_RUN",
+      "unsupportedClaims": "REVIEW_REQUIRED",
+      "save": "NOT_SAVED",
+      "error": "OpenRouter returned an empty response.",
+      "errorCode": "INVALID_AI_RESPONSE"
+    },
+    {
+      "requestedModel": "liquid/lfm-2.5-2.6b:free",
+      "format": "schema",
+      "actualModel": null,
+      "cost": null,
+      "usage": null,
+      "rawResponse": null,
+      "jsonParsing": "NOT_RUN",
+      "schemaValidation": "NOT_RUN",
+      "semanticValidation": "NOT_RUN",
+      "smartSchema": "NOT_RUN",
+      "unsupportedClaims": "REVIEW_REQUIRED",
+      "save": "NOT_SAVED",
+      "error": "OpenRouter returned an empty response.",
+      "errorCode": "INVALID_AI_RESPONSE"
+    },
+    {
+      "requestedModel": "cohere/north-mini-code:free",
+      "format": "prompt",
+      "actualModel": null,
+      "cost": null,
+      "usage": null,
+      "rawResponse": null,
+      "jsonParsing": "NOT_RUN",
+      "schemaValidation": "NOT_RUN",
+      "semanticValidation": "NOT_RUN",
+      "smartSchema": "NOT_RUN",
+      "unsupportedClaims": "REVIEW_REQUIRED",
+      "save": "NOT_SAVED",
+      "error": "OpenRouter returned an empty response.",
+      "errorCode": "INVALID_AI_RESPONSE"
+    },
+    {
+      "requestedModel": "poolside/laguna-xs-2.1:free",
+      "format": "prompt",
+      "actualModel": null,
+      "cost": null,
+      "usage": null,
+      "rawResponse": null,
+      "jsonParsing": "NOT_RUN",
+      "schemaValidation": "NOT_RUN",
+      "semanticValidation": "NOT_RUN",
+      "smartSchema": "NOT_RUN",
+      "unsupportedClaims": "REVIEW_REQUIRED",
+      "save": "NOT_SAVED",
+      "error": "Free AI quota is temporarily exhausted.",
+      "errorCode": "FREE_QUOTA_EXCEEDED"
+    }
+  ]
+}

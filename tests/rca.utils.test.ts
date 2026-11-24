@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatRcaEvidence, getConfidenceBand, hasActionableRca, matchesCaseFilters, removeCaseById } from "../shared/rca";
+import { formatRcaEvidence, getConfidenceBand, hasActionableRca, isValidCacheableRcaResult, matchesCaseFilters, removeCaseById } from "../shared/rca";
 import { buildRcaChatPrompt } from "../shared/chat";
 import { buildRcaReportHtml } from "../shared/report";
 import { makeAiCacheKey, stableSerialize } from "../shared/ai";
@@ -25,6 +25,19 @@ describe("RCA utilities", () => {
     expect(hasActionableRca({ systemicCause: "Process gap", smartActions: [], openQuestions: [] })).toBe(false);
   });
 
+  it("rejects an incomplete RCA response before it can reach the result view", () => {
+    expect(isValidCacheableRcaResult({
+      executiveSummary: "Есть предварительная гипотеза",
+      physicalCause: "Причина требует проверки",
+      humanFactor: "Данные отсутствуют",
+      systemicCause: "Процесс требует проверки",
+      smartActions: [],
+      confidence: 40,
+      openQuestions: ["Нужен замер"],
+      methodNotes: "Не завершено",
+    })).toBe(false);
+  });
+
   it("builds an exportable report with root cause and marker notes", () => {
     const html = buildRcaReportHtml({
       title: "Разрушение подшипника P-204",
@@ -44,15 +57,51 @@ describe("RCA utilities", () => {
         confidence: 78,
         openQuestions: ["Есть протокол?"],
         methodNotes: "Требуется проверка",
+        structuredRca: { facts: [{ statement: "Рост вибрации зафиксирован оператором", source: "USER_PROVIDED", evidenceRefs: ["bearing.jpg"] }], symptoms: [{ statement: "Перегрев подшипника", evidenceRefs: ["bearing.jpg"] }], hypotheses: [{ statement: "Возможна несоосность", supportingFactIndexes: [0], confidence: 40, status: "OPEN" }], missingData: ["Нет протокола центровки"] },
       },
     }, "24 сен 2026");
     expect(html).toContain("Пробел в процессе запуска");
     expect(html).toContain("Физическая причина");
+    expect(html).toContain("Физическая причина:</b> Перегрев");
     expect(html).toContain("Человеческий фактор");
     expect(html).toContain("Системная причина");
     expect(html).toContain("SMART");
+    expect(html).toContain("Рост вибрации зафиксирован оператором");
+    expect(html).toContain("НЕДОСТАЮЩИЕ ДАННЫЕ");
+    expect(html).toContain("Нет протокола центровки");
     expect(html).toContain("след перегрева");
-    expect(html).toContain("НАДЁЖКИН / RCA REPORT");
+    expect(html).toContain("НАДЁЖКИН / ОТЧЁТ RCA");
+  });
+
+  it("projects all available workspace data without inventing confirmation or measurements", () => {
+    const html = buildRcaReportHtml({
+      title: "MGA-121B", equipmentType: "Центробежный насос", assetTag: "MGA-121B", location: "2111", severity: "Высокий", narrative: "Пропуск т/у",
+      evidence: [{ id: "ev-1", kind: "photo", name: "seal.jpg", mediaHash: "hash-1", note: "Осмотр" }],
+      result: {
+        executiveSummary: "Предварительный вывод", physicalCause: "Гипотеза физической причины", humanFactor: "Данные отсутствуют", systemicCause: "Проверка процесса требуется",
+        smartActions: [{ priority: "P1", specific: "Проверить уплотнение", measurable: "Получить протокол", achievable: "После осмотра", relevant: "Проверяет гипотезу", timeBound: "До следующего пуска" }],
+        confidence: 35, openQuestions: ["Какова модель уплотнения?"], methodNotes: "Причина не подтверждена",
+        structuredRca: { facts: [{ statement: "Есть утечка", source: "MEDIA_OBSERVED", evidenceRefs: ["ev-1"] }], symptoms: [{ statement: "Пропуск т/у", evidenceRefs: ["ev-1"] }], hypotheses: [{ statement: "Возможен износ", supportingFactIndexes: [0], confidence: 35, status: "OPEN" }], missingData: ["Модель уплотнения"] },
+      },
+      workspace: {
+        timeline: [{ id: "tl-1", stage: "Обнаружение", occurredAt: "2026-10-21T10:00:00Z", description: "Обнаружена утечка", source: "Журнал смены" }],
+        measurements: [{ id: "m-1", parameter: "Давление", value: null, unit: "бар", measuredAt: "2026-10-21T10:10:00Z", source: "Не измерено", comment: "Ожидается замер", evidenceIds: ["missing-measurement"] }],
+        tasks: [{ number: 1, title: "Зафиксировать факт отказа", status: "TODO", comment: "Нужна запись", owner: "", evidenceIds: ["ev-1"] }],
+        actions: [{ description: "Осмотреть уплотнение", status: "PLANNED", owner: "", dueAt: "", actualResult: "" }],
+        rootCause: { statement: "Возможен износ", type: "Technical", confirmedBy: "Ответственный инженер", confirmedAt: "2026-10-21T10:00:00Z" },
+      },
+    }, "21.10.2026");
+    expect(html).toContain("Обнаружена утечка");
+    expect(html).toContain("2026-10-21T10:10:00Z");
+    expect(html).toContain("Источник недоступен: missing-measurement");
+    expect(html).not.toContain("Нужна запись");
+    expect(html).toContain("Осмотреть уплотнение");
+    expect(html).toContain("Гипотеза / требует подтверждения");
+    expect(html).toContain("SMART-рекомендации являются рекомендациями ИИ и не означают выполнения мероприятия");
+    expect(html).toContain("Контрольный список RCA / 16 шагов");
+    expect(html).toContain("Шаги контроля отображают фактически сохранённый статус проверки");
+    expect(html).not.toContain("<th>Комментарий</th><th>Ответственный</th><th>Срок</th><th>Evidence</th>");
+    expect(html).not.toContain("Измерения не заполнены");
   });
 
   it("filters cases by query, tag and status", () => {
@@ -78,6 +127,7 @@ describe("RCA utilities", () => {
         confidence: 70,
         openQuestions: ["Есть протокол?"],
         methodNotes: "Нужна проверка",
+        structuredRca: { facts: [{ statement: "Рост вибрации зафиксирован оператором", source: "USER_PROVIDED", evidenceRefs: ["bearing.jpg"] }], symptoms: [{ statement: "Перегрев подшипника", evidenceRefs: ["bearing.jpg"] }], hypotheses: [{ statement: "Возможна несоосность", supportingFactIndexes: [0], confidence: 40, status: "OPEN" }], missingData: ["Нет протокола центровки"] },
       },
       evidence: [{ kind: "photo", name: "bearing.jpg", note: "След перегрева" }],
       history: [{ role: "user", content: "Почему это корневая причина?" }],

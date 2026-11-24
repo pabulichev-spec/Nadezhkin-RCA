@@ -21,7 +21,8 @@ export default function OAuthCallback() {
 
   useEffect(() => {
     const handleCallback = async () => {
-      console.log("[OAuth] callback:received", {
+      console.log("[OAuth] Callback handler triggered");
+      console.log("[OAuth] Callback parameters received", {
         hasCode: !!params.code,
         hasState: !!params.state,
         hasError: !!params.error,
@@ -52,9 +53,9 @@ export default function OAuthCallback() {
                 lastSignedIn: new Date(userData.lastSignedIn || Date.now()),
               };
               await Auth.setUserInfo(userInfo);
-              console.log("[OAuth] User info stored", { hasUser: true });
+              console.log("[OAuth] User info stored");
             } catch (err) {
-              console.error("[OAuth] Failed to parse user data:", err);
+              console.error("[OAuth] Failed to parse user data", { type: "INVALID_USER_PAYLOAD" });
             }
           }
 
@@ -78,12 +79,12 @@ export default function OAuthCallback() {
           if (params.state) urlParams.set("state", params.state);
           if (params.error) urlParams.set("error", params.error);
           url = `?${urlParams.toString()}`;
-          console.log("[OAuth] Constructed callback query", { hasCode: !!params.code, hasState: !!params.state, hasError: !!params.error });
+          console.log("[OAuth] Constructed callback URL from route params");
         } else {
           console.log("[OAuth] No params found, checking Linking.getInitialURL()...");
           // Fallback: try to get from Linking
           const initialUrl = await Linking.getInitialURL();
-          console.log("[OAuth] Linking.getInitialURL", { present: !!initialUrl });
+          console.log("[OAuth] Linking initial URL checked", { present: !!initialUrl });
           if (initialUrl) {
             url = initialUrl;
           }
@@ -93,7 +94,7 @@ export default function OAuthCallback() {
         const error =
           params.error || (url ? new URL(url, "http://dummy").searchParams.get("error") : null);
         if (error) {
-          console.error("[OAuth] Error parameter found:", error);
+            console.error("[OAuth] Provider returned an error", { hasError: true });
           setStatus("error");
           setErrorMessage(error || "OAuth error occurred");
           return;
@@ -110,20 +111,16 @@ export default function OAuthCallback() {
           code = params.code;
           state = params.state;
         } else if (url) {
-          console.log("[OAuth] Parsing callback URL", { present: true });
+          console.log("[OAuth] Parsing callback URL");
           // Parse from URL
           try {
             const urlObj = new URL(url);
             code = urlObj.searchParams.get("code");
             state = urlObj.searchParams.get("state");
             sessionToken = urlObj.searchParams.get("sessionToken");
-            console.log("[OAuth] callback:parsed", {
-              hasCode: !!code,
-              hasState: !!state,
-              sessionToken: sessionToken ? "present" : "missing",
-            });
-          } catch (e) {
-            console.log("[OAuth] Failed to parse callback URL, trying fallback parser");
+            console.log("[OAuth] Extracted callback parameters", { hasCode: !!code, hasState: !!state, hasSessionToken: !!sessionToken });
+          } catch {
+            console.log("[OAuth] Callback URL parsing fallback", { parser: "regex" });
             // Try parsing as relative URL with query params
             const match = url.match(/[?&](code|state|sessionToken)=([^&]+)/g);
             if (match) {
@@ -133,11 +130,7 @@ export default function OAuthCallback() {
                 if (key === "state") state = decodeURIComponent(value);
                 if (key === "sessionToken") sessionToken = decodeURIComponent(value);
               });
-              console.log("[OAuth] callback:parsed", {
-                hasCode: !!code,
-                hasState: !!state,
-                sessionToken: sessionToken ? "present" : "missing",
-              });
+              console.log("[OAuth] Extracted callback parameters", { hasCode: !!code, hasState: !!state, hasSessionToken: !!sessionToken });
             }
           }
         }
@@ -175,11 +168,7 @@ export default function OAuthCallback() {
         }
 
         // Exchange code for session token
-        console.log("[OAuth] mobile_exchange:attempt", {
-          endpoint: "/api/oauth/mobile",
-          hasCode: true,
-          hasState: true,
-        });
+        console.log("[OAuth] Exchanging authorization code");
         const result = await Api.exchangeOAuthCode(code, state);
         console.log("[OAuth] Exchange result:", {
           hasSessionToken: !!result.sessionToken,
@@ -194,7 +183,7 @@ export default function OAuthCallback() {
 
           // Store user info if available
           if (result.user) {
-            console.log("[OAuth] User data received", { present: true });
+            console.log("[OAuth] User data received");
             const userInfo: Auth.User = {
               id: result.user.id,
               openId: result.user.openId,
@@ -204,7 +193,7 @@ export default function OAuthCallback() {
               lastSignedIn: new Date(result.user.lastSignedIn || Date.now()),
             };
             await Auth.setUserInfo(userInfo);
-            console.log("[OAuth] User info stored", { hasUser: true });
+            console.log("[OAuth] User info stored");
           } else {
             console.log("[OAuth] No user data in result");
           }
@@ -218,15 +207,14 @@ export default function OAuthCallback() {
             router.replace("/(tabs)");
           }, 1000);
         } else {
-          console.error("[OAuth] No session token in exchange result", { hasUser: !!result.user });
+          console.error("[OAuth] No session token in exchange result");
           setStatus("error");
           setErrorMessage("No session token received");
         }
       } catch (error) {
-          console.error("[OAuth] mobile_exchange:failure", {
-            errorType: error instanceof Error ? error.name : "unknown",
-            message: error instanceof Error ? error.message : "unknown",
-          });
+        console.error("[OAuth] Callback processing failed", {
+          type: error instanceof Error ? "ERROR" : "UNKNOWN_ERROR",
+        });
         setStatus("error");
         setErrorMessage(
           error instanceof Error ? error.message : "Failed to complete authentication",

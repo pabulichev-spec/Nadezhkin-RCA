@@ -20,36 +20,56 @@ export default function TabLayout() {
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarStyle: {
-          display: "none",
-          paddingTop: 8,
+          paddingTop: 7,
           paddingBottom: bottomPadding,
-          height: tabBarHeight,
-          backgroundColor: colors.background,
-          borderTopColor: colors.border,
-          borderTopWidth: 0.5,
+          height: tabBarHeight + 4,
+          backgroundColor: "#061426",
+          borderTopColor: "#233B59",
+          borderTopWidth: 1,
         },
-        tabBarLabelStyle: { fontSize: 10, fontWeight: "700" },
+        tabBarItemStyle: { minHeight: 48 },
+        tabBarLabelStyle: { fontSize: 10, fontWeight: "800" },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: "Кейсы",
+          title: "Главная",
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="house.fill" color={color} />,
         }}
       />
       <Tabs.Screen
-        name="methodology"
+        name="cases"
         options={{
-          title: "Методика",
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="paperplane.fill" color={color} />,
+          title: "Кейсы",
+          tabBarIcon: ({ color }) => <IconSymbol size={24} name="doc.text.fill" color={color} />,
         }}
+      />
+      <Tabs.Screen
+        name="methodology"
+        options={{ href: null, title: "Методика" }}
       />
       <Tabs.Screen
         name="usage"
         options={{
-          title: "AI-расход",
+          title: "Аналитика",
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="chart.bar.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="pumps"
+        options={{ href: null, title: "Насосы" }}
+      />
+      <Tabs.Screen name="workspace" options={{ href: null, title: "Рабочая область" }} />
+      <Tabs.Screen
+        name="knowledge"
+        options={{ href: null, title: "Знания" }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: "Профиль",
+          tabBarIcon: ({ color }) => <IconSymbol size={24} name="person.crop.circle.fill" color={color} />,
         }}
       />
     </Tabs>

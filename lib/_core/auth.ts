@@ -4,7 +4,7 @@ import { SESSION_TOKEN_KEY, USER_INFO_KEY } from "@/constants/oauth";
 
 export type User = {
   id: number;
-  openId: string;
+  openId?: string;
   name: string | null;
   email: string | null;
   loginMethod: string | null;
@@ -22,7 +22,7 @@ export async function getSessionToken(): Promise<string | null> {
     // Use SecureStore for native
     console.log("[Auth] Getting session token...");
     const token = await SecureStore.getItemAsync(SESSION_TOKEN_KEY);
-    console.log("[Auth] Session token retrieved from SecureStore", { present: !!token });
+    console.log("[Auth] Session token retrieved from SecureStore:", token ? "present" : "missing");
     return token;
   } catch (error) {
     console.error("[Auth] Failed to get session token:", error);
@@ -39,7 +39,7 @@ export async function setSessionToken(token: string): Promise<void> {
     }
 
     // Use SecureStore for native
-    console.log("[Auth] Setting session token", { present: true });
+    console.log("[Auth] Setting session token...");
     await SecureStore.setItemAsync(SESSION_TOKEN_KEY, token);
     console.log("[Auth] Session token stored in SecureStore successfully");
   } catch (error) {
@@ -83,7 +83,7 @@ export async function getUserInfo(): Promise<User | null> {
       return null;
     }
     const user = JSON.parse(info);
-    console.log("[Auth] User info retrieved", { present: true });
+    console.log("[Auth] User info retrieved: present");
     return user;
   } catch (error) {
     console.error("[Auth] Failed to get user info:", error);
@@ -93,7 +93,7 @@ export async function getUserInfo(): Promise<User | null> {
 
 export async function setUserInfo(user: User): Promise<void> {
   try {
-    console.log("[Auth] Setting user info", { present: true });
+    console.log("[Auth] Setting user info...");
 
     if (Platform.OS === "web") {
       // Use localStorage for web

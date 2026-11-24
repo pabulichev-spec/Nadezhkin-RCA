@@ -1,6 +1,6 @@
 import { AXIOS_TIMEOUT_MS, COOKIE_NAME, ONE_YEAR_MS } from "../../shared/const.js";
 import { ForbiddenError } from "../../shared/_core/errors.js";
-import axios, { AxiosError, type AxiosInstance } from "axios";
+import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
@@ -28,28 +28,6 @@ export type SessionPayload = {
 const EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
 const GET_USER_INFO_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfo`;
 const GET_USER_INFO_WITH_JWT_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserInfoWithJwt`;
-const OAUTH_TRANSIENT_STATUSES = new Set([502, 503, 504]);
-const OAUTH_RETRY_DELAYS_MS = [250, 750] as const;
-
-function upstreamStatus(error: unknown) {
-  return error instanceof AxiosError && typeof error.response?.status === "number"
-    ? error.response.status
-    : undefined;
-}
-
-async function withOAuthRetry<T>(operation: () => Promise<T>, operationName: string): Promise<T> {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      return await operation();
-    } catch (error) {
-      const status = upstreamStatus(error);
-      const retryable = status !== undefined && OAUTH_TRANSIENT_STATUSES.has(status) && attempt < OAUTH_RETRY_DELAYS_MS.length;
-      console.warn("[OAuth] upstream request failed", { operation: operationName, status, attempt, retryable });
-      if (!retryable) throw error;
-      await new Promise((resolve) => setTimeout(resolve, OAUTH_RETRY_DELAYS_MS[attempt]));
-    }
-  }
-}
 
 class OAuthService {
   constructor(private client: ReturnType<typeof axios.create>) {
@@ -74,21 +52,15 @@ class OAuthService {
       redirectUri: this.decodeState(state),
     };
 
-    const { data } = await withOAuthRetry(
-      () => this.client.post<ExchangeTokenResponse>(EXCHANGE_TOKEN_PATH, payload),
-      "exchange_token",
-    );
+    const { data } = await this.client.post<ExchangeTokenResponse>(EXCHANGE_TOKEN_PATH, payload);
 
     return data;
   }
 
   async getUserInfoByToken(token: ExchangeTokenResponse): Promise<GetUserInfoResponse> {
-    const { data } = await withOAuthRetry(
-      () => this.client.post<GetUserInfoResponse>(GET_USER_INFO_PATH, {
-        accessToken: token.accessToken,
-      }),
-      "get_user_info",
-    );
+    const { data } = await this.client.post<GetUserInfoResponse>(GET_USER_INFO_PATH, {
+      accessToken: token.accessToken,
+    });
 
     return data;
   }
@@ -315,6 +287,13 @@ class SDKServer {
 
     if (!user) {
       throw ForbiddenError("User not found");
+    }
+
+    if (session.sessionVersion !== user.sessionVersion) {
+      throw ForbiddenError("Session revoked");
+    }
+    if (user.status !== "active") {
+      throw ForbiddenError(user.status === "disabled" ? "User disabled" : "User pending approval");
     }
 
     await db.upsertUser({

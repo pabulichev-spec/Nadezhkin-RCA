@@ -28,7 +28,6 @@ export function useAuth(options?: UseAuthOptions) {
         if (apiUser) {
           const userInfo: Auth.User = {
             id: apiUser.id,
-            openId: apiUser.openId,
             name: apiUser.name,
             email: apiUser.email,
             loginMethod: apiUser.loginMethod,
@@ -37,7 +36,7 @@ export function useAuth(options?: UseAuthOptions) {
           setUser(userInfo);
           // Cache user info in localStorage for faster subsequent loads
           await Auth.setUserInfo(userInfo);
-          console.log("[useAuth] Web user set from API", { present: true });
+          console.log("[useAuth] Web user set from API");
         } else {
           console.log("[useAuth] Web: No authenticated user from API");
           setUser(null);
@@ -49,7 +48,7 @@ export function useAuth(options?: UseAuthOptions) {
       // Native platform: use token-based auth
       console.log("[useAuth] Native platform: checking for session token...");
       const sessionToken = await Auth.getSessionToken();
-      console.log("[useAuth] Session token", { present: !!sessionToken });
+      console.log("[useAuth] Session token:", sessionToken ? "present" : "missing");
       if (!sessionToken) {
         console.log("[useAuth] No session token, setting user to null");
         setUser(null);
@@ -58,7 +57,7 @@ export function useAuth(options?: UseAuthOptions) {
 
       // Use cached user info for native (token validates the session)
       const cachedUser = await Auth.getUserInfo();
-      console.log("[useAuth] Cached user", { present: !!cachedUser });
+      console.log("[useAuth] Cached user:", cachedUser ? "present" : "missing");
       if (cachedUser) {
         console.log("[useAuth] Using cached user info");
         setUser(cachedUser);
@@ -103,7 +102,7 @@ export function useAuth(options?: UseAuthOptions) {
       } else {
         // Native: check for cached user info first for faster initial load
         Auth.getUserInfo().then((cachedUser) => {
-          console.log("[useAuth] Native cached user check", { present: !!cachedUser });
+          console.log("[useAuth] Native cached user check:", cachedUser ? "present" : "missing");
           if (cachedUser) {
             console.log("[useAuth] Native: setting cached user immediately");
             setUser(cachedUser);

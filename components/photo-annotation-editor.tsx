@@ -83,7 +83,7 @@ const styles = StyleSheet.create({
   noPhoto: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
   noPhotoText: { fontSize: 12 },
   marker: { position: "absolute", transform: [{ translateX: -10 }, { translateY: -10 }], alignItems: "flex-start" },
-  markerDot: { width: 22, height: 22, borderRadius: 12, backgroundColor: "#F2673A", borderWidth: 2, borderColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
+  markerDot: { width: 22, height: 22, borderRadius: 12, backgroundColor: "#1683F5", borderWidth: 2, borderColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
   markerNumber: { color: "#FFFFFF", fontSize: 10, fontWeight: "800" },
   markerLabel: { marginTop: 4, marginLeft: 8, maxWidth: 180, backgroundColor: "rgba(22,38,49,0.92)", borderRadius: 6, paddingHorizontal: 7, paddingVertical: 5 },
   markerText: { color: "#FFFFFF", fontSize: 10, lineHeight: 13, fontWeight: "700" },

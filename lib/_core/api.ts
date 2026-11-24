@@ -1,16 +1,12 @@
 import { Platform } from "react-native";
 import { getApiBaseUrl } from "@/constants/oauth";
 import * as Auth from "./auth";
+import { getBrowserCsrfToken } from "@/lib/transport";
 
 type ApiResponse<T> = {
   data?: T;
   error?: string;
 };
-
-function safeEndpoint(endpoint: string): string {
-  const [path] = endpoint.split(/[?#]/, 1);
-  return path || "/";
-}
 
 export async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
@@ -24,17 +20,14 @@ export async function apiCall<T>(endpoint: string, options: RequestInit = {}): P
   //   Cookie is set on backend domain via POST /api/auth/session after receiving token via postMessage
   if (Platform.OS !== "web") {
     const sessionToken = await Auth.getSessionToken();
-    console.log("[API] apiCall:", {
-      endpoint: safeEndpoint(endpoint),
-      hasToken: !!sessionToken,
-      method: options.method || "GET",
-    });
+    console.log("[API] apiCall:", { hasToken: !!sessionToken, method: options.method || "GET" });
     if (sessionToken) {
       headers["Authorization"] = `Bearer ${sessionToken}`;
       console.log("[API] Authorization header added");
     }
   } else {
-    console.log("[API] apiCall:", { endpoint, platform: "web", method: options.method || "GET" });
+    const csrf = getBrowserCsrfToken();
+    if (csrf) headers["X-CSRF-Token"] = csrf;
   }
 
   const baseUrl = getApiBaseUrl();
@@ -42,52 +35,36 @@ export async function apiCall<T>(endpoint: string, options: RequestInit = {}): P
   const cleanBaseUrl = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
   const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
   const url = baseUrl ? `${cleanBaseUrl}${cleanEndpoint}` : endpoint;
-  console.log("[API] Request", { endpoint: safeEndpoint(endpoint), method: options.method || "GET" });
-
   try {
-    console.log("[API] Making request...");
     const response = await fetch(url, {
       ...options,
       headers,
       credentials: "include",
     });
 
-    console.log("[API] Response", { endpoint: safeEndpoint(endpoint), status: response.status });
+    const contentType = response.headers.get("content-type");
+    const isJson = contentType?.toLowerCase().includes("application/json") ?? false;
 
     if (!response.ok) {
-      const errorText = await response.text();
-      let errorMessage = errorText;
-      let errorCode: string | undefined;
-      let errorOperation: string | undefined;
-      try {
-        const errorJson = JSON.parse(errorText);
-        errorMessage = errorJson.error || errorJson.message || errorText;
-        errorCode = typeof errorJson.code === "string" ? errorJson.code : undefined;
-        errorOperation = typeof errorJson.operation === "string" ? errorJson.operation : undefined;
-      } catch {
-        // Not JSON, use text as is
+      if (isJson) {
+        const errorJson = await response.json().catch(() => null) as { error?: unknown; message?: unknown } | null;
+        const safeMessage = typeof errorJson?.error === "string"
+          ? errorJson.error
+          : typeof errorJson?.message === "string"
+            ? errorJson.message
+            : `API request failed (${response.status})`;
+        throw new Error(safeMessage.slice(0, 240));
       }
-      console.error("[API] Request failed", {
-        endpoint: safeEndpoint(endpoint),
-        status: response.status,
-        code: errorCode,
-        operation: errorOperation,
-      });
-      throw new Error(errorMessage || `API call failed: ${response.statusText}`);
+      throw new Error(`API request failed (${response.status})`);
     }
 
-    const contentType = response.headers.get("content-type");
-    if (contentType && contentType.includes("application/json")) {
-      const data = await response.json();
-      console.log("[API] JSON response received");
-      return data as T;
-    }
-
-    const text = await response.text();
-    console.log("[API] Text response received");
-    return (text ? JSON.parse(text) : {}) as T;
+    if (!isJson) throw new Error(`API returned non-JSON response (${response.status})`);
+    return (await response.json()) as T;
   } catch (error) {
-    console.error("[API] Request failed:", error);
+    console.error("[API] Request failed", {
+      type: error instanceof Error ? "API_ERROR" : "UNKNOWN_ERROR",
+      endpoint: endpoint.split("?", 1)[0],
+    });
     if (error instanceof Error) {
       throw error;
     }
@@ -101,19 +78,13 @@ export async function exchangeOAuthCode(
   code: string,
   state: string,
 ): Promise<{ sessionToken: string; user: any }> {
-  console.log("[OAuth] mobile_exchange:start");
   // Use GET with query params
   const params = new URLSearchParams({ code, state });
   const endpoint = `/api/oauth/mobile?${params.toString()}`;
-  console.log("[OAuth] mobile_exchange:request", { endpoint: "/api/oauth/mobile", method: "GET" });
   const result = await apiCall<{ app_session_id: string; user: any }>(endpoint);
 
   // Convert app_session_id to sessionToken for compatibility
   const sessionToken = result.app_session_id;
-  console.log("[OAuth] mobile_exchange:success", {
-    hasSessionToken: !!sessionToken,
-    hasUser: !!result.user,
-  });
 
   return {
     sessionToken,
@@ -131,17 +102,18 @@ export async function logout(): Promise<void> {
 // Get current authenticated user (web uses cookie-based auth)
 export async function getMe(): Promise<{
   id: number;
-  openId: string;
   name: string | null;
   email: string | null;
   loginMethod: string | null;
+  role?: "user" | "admin";
+  status?: "pending" | "active" | "disabled";
   lastSignedIn: string;
 } | null> {
   try {
     const result = await apiCall<{ user: any }>("/api/auth/me");
     return result.user || null;
   } catch (error) {
-    console.error("[API] getMe failed:", error);
+    console.error("[API] getMe failed", { type: "API_ERROR" });
     return null;
   }
 }
@@ -150,7 +122,6 @@ export async function getMe(): Promise<{
 // Called after receiving token via postMessage to get a proper Set-Cookie from the backend
 export async function establishSession(token: string): Promise<boolean> {
   try {
-    console.log("[API] establishSession: setting cookie on backend...");
     const baseUrl = getApiBaseUrl();
     const url = `${baseUrl}/api/auth/session`;
 
@@ -164,11 +135,9 @@ export async function establishSession(token: string): Promise<boolean> {
     });
 
     if (!response.ok) {
-      console.error("[API] establishSession failed:", response.status);
       return false;
     }
 
-    console.log("[API] establishSession: cookie set successfully");
     return true;
   } catch (error) {
     console.error("[API] establishSession error:", error);

@@ -29,7 +29,7 @@ const schemeFromBundleId = `manus${timestamp}`;
 const env = {
   // App branding - update these values directly (do not use env vars)
   appName: "Надёжкин",
-  appSlug: "nadezhkin",
+  appSlug: "pump-rca-mobile",
   // S3 URL of the app logo - set this to the URL returned by generate_image when creating custom logo
   // Leave empty to use the default icon from assets/images/icon.png
   logoUrl: "",
@@ -41,11 +41,11 @@ const env = {
 const config: ExpoConfig = {
   name: env.appName,
   slug: env.appSlug,
-  version: "1.0.10",
+  version: "1.0.6",
   orientation: "portrait",
   icon: "./assets/images/icon.png",
   scheme: env.scheme,
-  userInterfaceStyle: "dark",
+  userInterfaceStyle: "automatic",
   newArchEnabled: true,
   ios: {
     supportsTablet: true,
@@ -55,7 +55,7 @@ const config: ExpoConfig = {
       }
   },
   android: {
-    versionCode: 11,
+    versionCode: 12,
     adaptiveIcon: {
       backgroundColor: "#E6F4FE",
       foregroundImage: "./assets/images/android-icon-foreground.png",
@@ -90,8 +90,8 @@ const config: ExpoConfig = {
     [
       "expo-image-picker",
       {
-        photosPermission: "Разрешите Надёжкину использовать фото для расследования отказов.",
-        cameraPermission: "Разрешите Надёжкину использовать камеру для фиксации оборудования.",
+        photosPermission: "Разрешите приложению «Надёжкин» использовать фото для расследования отказов.",
+        cameraPermission: "Разрешите приложению «Надёжкин» использовать камеру для фиксации оборудования.",
       },
     ],
     "expo-document-picker",

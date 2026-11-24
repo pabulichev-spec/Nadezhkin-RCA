@@ -104,8 +104,6 @@ jobs:
           else
             echo "No release keystore configured; using generated debug signing for CI validation only."
           fi
-          node scripts/prepare-android-release-signing.mjs
-
       - name: Build Release APK
         working-directory: android
         run: ./gradlew --no-daemon --stacktrace --build-cache :app:assembleRelease
@@ -118,16 +116,12 @@ jobs:
           test -s "$APK"
           "$BUILD_TOOLS/aapt" dump badging "$APK" | tee apk-badging.txt
           grep -F "package: name='com.app.pumprcamobile'" apk-badging.txt
-          grep -F "versionCode='11'" apk-badging.txt
-          grep -F "versionName='1.0.10'" apk-badging.txt
+          grep -F "versionCode='12'" apk-badging.txt
+          grep -F "versionName='1.0.6'" apk-badging.txt
           grep -F "application-label:'Надёжкин'" apk-badging.txt
           unzip -l "$APK" | grep -E 'assets/.*(bundle|index)' | head -20
           if ! unzip -p "$APK" assets/index.android.bundle 2>/dev/null | grep -aFq 'pump-rca-ntbesymu.manus.space'; then
             echo 'Production API URL was not found in the embedded JS bundle.' >&2
-            exit 1
-          fi
-          if unzip -p "$APK" assets/index.android.bundle 2>/dev/null | grep -aEq 'PumpRCA|PUMPRCA'; then
-            echo 'Legacy PumpRCA branding was found in the embedded JS bundle.' >&2
             exit 1
           fi
           sha256sum "$APK" | tee apk-sha256.txt

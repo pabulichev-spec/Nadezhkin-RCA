@@ -4,6 +4,8 @@ import superjson from "superjson";
 import type { AppRouter } from "@/server/routers";
 import { getApiBaseUrl } from "@/constants/oauth";
 import * as Auth from "@/lib/_core/auth";
+import { buildTransportHeaders, fetchJsonTransport, getBrowserCsrfToken } from "@/lib/transport";
+import { Platform } from "react-native";
 
 /**
  * tRPC React client for type-safe API calls.
@@ -27,12 +29,23 @@ export function createTRPCClient() {
         transformer: superjson,
         async headers() {
           const token = await Auth.getSessionToken();
-          return token ? { Authorization: `Bearer ${token}` } : {};
+          const csrf = getBrowserCsrfToken();
+          return {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(csrf ? { "X-CSRF-Token": csrf } : {}),
+          };
         },
         // Custom fetch to include credentials for cookie-based auth
-        fetch(url, options) {
-          return fetch(url, {
+        async fetch(url, options) {
+          const sessionToken = Platform.OS === "web" ? null : await Auth.getSessionToken();
+          const headers = buildTransportHeaders(options?.headers, {
+            platform: Platform.OS === "web" ? "web" : "native",
+            sessionToken,
+            csrfToken: getBrowserCsrfToken(),
+          });
+          return fetchJsonTransport(url, {
             ...options,
+            headers,
             credentials: "include",
           });
         },
