@@ -118,8 +118,8 @@ jobs:
           test -s "$APK"
           "$BUILD_TOOLS/aapt" dump badging "$APK" | tee apk-badging.txt
           grep -F "package: name='com.app.pumprcamobile'" apk-badging.txt
-          grep -F "versionCode='10'" apk-badging.txt
-          grep -F "versionName='1.0.9'" apk-badging.txt
+          grep -F "versionCode='11'" apk-badging.txt
+          grep -F "versionName='1.0.10'" apk-badging.txt
           grep -F "application-label:'Надёжкин'" apk-badging.txt
           unzip -l "$APK" | grep -E 'assets/.*(bundle|index)' | head -20
           if ! unzip -p "$APK" assets/index.android.bundle 2>/dev/null | grep -aFq 'pump-rca-ntbesymu.manus.space'; then
