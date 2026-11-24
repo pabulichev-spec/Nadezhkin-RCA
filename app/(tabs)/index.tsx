@@ -41,6 +41,7 @@ const STORAGE_KEY = "pumprca.cases.v1";
 
 type EvidenceKind = "photo" | "video" | "text" | "file";
 type Severity = "Критический" | "Высокий" | "Средний";
+type HomeTab = "home" | "cases" | "analytics" | "equipment" | "profile";
 
 type Evidence = {
   id: string;
@@ -246,6 +247,8 @@ export default function HomeScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTag, setActiveTag] = useState("Все");
   const [activeStatus, setActiveStatus] = useState("Все");
+  const [activeTab, setActiveTab] = useState<HomeTab>("home");
+  const [menuOpen, setMenuOpen] = useState(false);
   const filteredEquipmentTypes = useMemo(() => filterEquipmentTypes(equipmentSearch), [equipmentSearch]);
 
   const selectedCase = cases.find((item) => item.id === selectedId) ?? cases[0];
@@ -275,6 +278,8 @@ export default function HomeScreen() {
 
   const completedCount = useMemo(() => cases.filter((item) => item.status === "Готово").length, [cases]);
   const openCount = cases.length - completedCount;
+  const criticalCount = useMemo(() => cases.filter((item) => item.severity === "Критический").length, [cases]);
+  const attentionCount = useMemo(() => cases.filter((item) => item.severity !== "Средний").length, [cases]);
   const allTags = useMemo(() => ["Все", ...Array.from(new Set(cases.flatMap((item) => item.tags ?? []))).sort()], [cases]);
   const filteredCases = useMemo(() => cases.filter((item) => matchesCaseFilters(item, searchQuery, activeTag, activeStatus)), [activeStatus, activeTag, cases, searchQuery]);
 
@@ -500,10 +505,100 @@ export default function HomeScreen() {
     }
   };
 
-  if (!selectedCase) return <ScreenContainer containerClassName="bg-background" edges={["top", "left", "right"]}><View style={[styles.header, { borderBottomColor: colors.border }]}><View><Text style={[styles.eyebrow, { color: colors.primary }]}>НАДЁЖКИН / FIELD MODE</Text><Text style={[styles.title, { color: colors.foreground }]}>Расследования отказов</Text></View></View><View style={styles.emptyState}><Icon name="folder-open" size={42} color={colors.muted} /><Text style={[styles.emptyStateTitle, { color: colors.foreground }]}>Расследований пока нет</Text><Text style={[styles.emptyStateText, { color: colors.muted }]}>Создайте новое расследование, чтобы собрать материалы и запустить RCA-анализ.</Text><Pressable onPress={openNewCase} style={[styles.createButton, { backgroundColor: colors.primary, paddingHorizontal: 20 }]}><Icon name="add" size={20} color="#FFFFFF" /><Text style={styles.createButtonText}>Новое расследование</Text></Pressable></View></ScreenContainer>;
+  const navigateToCases = () => {
+    setActiveTab("cases");
+    setMenuOpen(false);
+  };
+
+  const startNewCase = () => {
+    navigateToCases();
+    openNewCase();
+  };
+
+  const renderTopBar = () => (
+    <View style={styles.dashboardTopBar}>
+      <Pressable onPress={() => setMenuOpen((current) => !current)} style={styles.menuButton}>
+        <Icon name="menu" size={29} color="#E6F0F8" />
+      </Pressable>
+      <View style={styles.topBarTitleWrap}>
+        <Text style={styles.topBarTitle}>Центр надёжности</Text>
+        <Text style={styles.topBarSubtitle}>Насосное оборудование · рабочее пространство</Text>
+      </View>
+      <View style={styles.onlineBadge}><View style={styles.onlineDot} /><Text style={styles.onlineText}>ОНЛАЙН</Text></View>
+    </View>
+  );
+
+  const renderBottomNav = () => (
+    <View style={styles.bottomNav}>
+      {([[
+        "home", "home", "Главная"], ["cases", "assignment", "Кейсы"], ["analytics", "bar-chart", "Аналитика"], ["equipment", "apps", "Оборудование"], ["profile", "account-circle", "Профиль"]] as const).map(([tab, icon, label]) => (
+        <Pressable key={tab} onPress={() => setActiveTab(tab)} style={({ pressed }) => [styles.bottomNavItem, pressed && { opacity: 0.72 }]}>
+          <Icon name={icon} size={25} color={activeTab === tab ? "#6EB9F2" : "#A9BACB"} />
+          <Text style={[styles.bottomNavLabel, { color: activeTab === tab ? "#6EB9F2" : "#A9BACB" }]}>{label}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+
+  const renderMenu = () => menuOpen ? (
+    <View style={styles.menuPanel}>
+      <Text style={styles.menuEyebrow}>НАВИГАЦИЯ</Text>
+      <Pressable onPress={() => { setActiveTab("home"); setMenuOpen(false); }} style={styles.menuRow}><Icon name="dashboard" size={20} color="#6EB9F2" /><Text style={styles.menuRowText}>Центр надёжности</Text></Pressable>
+      <Pressable onPress={navigateToCases} style={styles.menuRow}><Icon name="folder-open" size={20} color="#6EB9F2" /><Text style={styles.menuRowText}>Все расследования</Text></Pressable>
+      <Pressable onPress={() => { setActiveTab("equipment"); setMenuOpen(false); }} style={styles.menuRow}><Icon name="settings" size={20} color="#6EB9F2" /><Text style={styles.menuRowText}>Каталог оборудования</Text></Pressable>
+      <Pressable onPress={() => { setActiveTab("profile"); setMenuOpen(false); }} style={styles.menuRow}><Icon name="person" size={20} color="#6EB9F2" /><Text style={styles.menuRowText}>Профиль и синхронизация</Text></Pressable>
+    </View>
+  ) : null;
+
+  if (activeTab === "home") return (
+    <ScreenContainer style={styles.dashboardRoot} containerClassName="bg-background" edges={["top", "left", "right", "bottom"]}>
+      {renderTopBar()}
+      <ScrollView contentContainerStyle={styles.dashboardContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.dashboardHero}>
+          <Text style={styles.dashboardEyebrow}>НАДЁЖКИН · ПОЛЕВОЙ РЕЖИМ</Text>
+          <View style={styles.heroTitleRow}><View style={{ flex: 1 }}><Text style={styles.dashboardTitle}>Центр надёжности</Text><Text style={styles.dashboardSubtitle}>Пульт надёжности насосного оборудования</Text></View><Pressable onPress={() => Alert.alert("Надёжкин", "Центр надёжности объединяет расследования, состояние оборудования и аналитику.")} style={styles.heroInfoButton}><Icon name="info-outline" size={28} color="#6EB9F2" /></Pressable></View>
+        </View>
+        <View style={styles.overviewBlock}><Text style={styles.dashboardEyebrow}>ОБЗОР СМЕНЫ · 24 НОЯ. 2026 Г.</Text><Text style={styles.overviewTitle}>Сводка по надёжности</Text><Text style={styles.overviewText}>Расследования и состояние оборудования — на одном экране.</Text><Pressable onPress={startNewCase} style={({ pressed }) => [styles.primaryDashboardButton, pressed && { opacity: 0.78 }]}><Icon name="add" size={28} color="#071629" /><Text style={styles.primaryDashboardButtonText}>Новое расследование</Text></Pressable></View>
+        <View style={styles.dashboardGrid}>
+          <DashboardMetric value={cases.length} label="всего кейсов" color="#E7F0F8" />
+          <DashboardMetric value={openCount} label="активные расследования" color="#F1C66A" />
+          <DashboardMetric value={completedCount} label="с выводом анализа" color="#65D1AE" />
+          <DashboardMetric value={criticalCount} label="критические события" color="#6EB9F2" />
+        </View>
+        <View style={styles.dashboardPanel}><View style={styles.panelTitleRow}><View><Text style={styles.panelTitle}>Состояние оборудования</Text><Text style={styles.panelHint}>Нажмите категорию для перехода к насосам</Text></View><Icon name="monitor-heart" size={30} color="#6EB9F2" /></View><StatusRow label="В работе" count={openCount} color="#F1C66A" total={Math.max(cases.length, 1)} /><StatusRow label="Готово к эксплуатации" count={completedCount} color="#65D1AE" total={Math.max(cases.length, 1)} /><StatusRow label="Требует внимания" count={attentionCount} color="#6EB9F2" total={Math.max(cases.length, 1)} /></View>
+        <View style={[styles.dashboardPanel, styles.quickPanel]}><Text style={styles.panelTitle}>Быстрые действия</Text><Text style={styles.panelHint}>Частые операции инженера</Text><View style={styles.quickActionGrid}><QuickAction icon="add-circle-outline" label="Новое расследование" onPress={startNewCase} /><QuickAction icon="folder-open" label="Открыть кейсы" onPress={navigateToCases} /><QuickAction icon="settings" label="Оборудование" onPress={() => { setActiveTab("equipment"); setMenuOpen(false); }} /><QuickAction icon="analytics" label="Аналитика" onPress={() => { setActiveTab("analytics"); setMenuOpen(false); }} /></View></View>
+      </ScrollView>
+      {renderMenu()}
+      {renderBottomNav()}
+    </ScreenContainer>
+  );
+
+  if (activeTab === "analytics") return (
+    <ScreenContainer style={styles.dashboardRoot} containerClassName="bg-background" edges={["top", "left", "right", "bottom"]}>
+      {renderTopBar()}
+      <ScrollView contentContainerStyle={styles.dashboardContent}><Text style={styles.dashboardEyebrow}>АНАЛИТИКА</Text><Text style={styles.dashboardTitle}>Аналитика надёжности</Text><Text style={styles.dashboardSubtitle}>Сводные показатели по расследованиям и оборудованию.</Text><View style={styles.dashboardGrid}><DashboardMetric value={cases.length} label="всего кейсов" color="#E7F0F8" /><DashboardMetric value={completedCount} label="завершено" color="#65D1AE" /><DashboardMetric value={openCount} label="в работе" color="#F1C66A" /><DashboardMetric value={criticalCount} label="критические" color="#6EB9F2" /></View><View style={styles.dashboardPanel}><Text style={styles.panelTitle}>Распределение состояния</Text><StatusRow label="Активные расследования" count={openCount} color="#F1C66A" total={Math.max(cases.length, 1)} /><StatusRow label="С выводом анализа" count={completedCount} color="#65D1AE" total={Math.max(cases.length, 1)} /><StatusRow label="Требуют внимания" count={attentionCount} color="#6EB9F2" total={Math.max(cases.length, 1)} /></View></ScrollView>{renderMenu()}{renderBottomNav()}
+    </ScreenContainer>
+  );
+
+  if (activeTab === "equipment") return (
+    <ScreenContainer style={styles.dashboardRoot} containerClassName="bg-background" edges={["top", "left", "right", "bottom"]}>
+      {renderTopBar()}
+      <ScrollView contentContainerStyle={styles.dashboardContent}><Text style={styles.dashboardEyebrow}>КАТАЛОГ ОБОРУДОВАНИЯ</Text><Text style={styles.dashboardTitle}>Оборудование</Text><Text style={styles.dashboardSubtitle}>Насосы и агрегаты, связанные с расследованиями.</Text>{Array.from(new Set(cases.map((item) => item.equipmentType))).map((type) => <Pressable key={type} onPress={navigateToCases} style={({ pressed }) => [styles.equipmentSummaryRow, pressed && { opacity: 0.72 }]}><View style={styles.equipmentIcon}><Icon name="settings" size={24} color="#6EB9F2" /></View><View style={{ flex: 1 }}><Text style={styles.equipmentSummaryTitle}>{type}</Text><Text style={styles.equipmentSummaryMeta}>{cases.filter((item) => item.equipmentType === type).length} расследований · открыть связанные кейсы</Text></View><Icon name="chevron-right" size={24} color="#A9BACB" /></Pressable>)}<Pressable onPress={startNewCase} style={styles.secondaryDashboardButton}><Icon name="add" size={21} color="#6EB9F2" /><Text style={styles.secondaryDashboardButtonText}>Добавить расследование по оборудованию</Text></Pressable></ScrollView>{renderMenu()}{renderBottomNav()}
+    </ScreenContainer>
+  );
+
+  if (activeTab === "profile") return (
+    <ScreenContainer style={styles.dashboardRoot} containerClassName="bg-background" edges={["top", "left", "right", "bottom"]}>
+      {renderTopBar()}
+      <ScrollView contentContainerStyle={styles.dashboardContent}><Text style={styles.dashboardEyebrow}>ПРОФИЛЬ</Text><Text style={styles.dashboardTitle}>Рабочее пространство</Text><Text style={styles.dashboardSubtitle}>Авторизация Manus и синхронизация данных Надёжкина.</Text><View style={styles.dashboardPanel}><View style={styles.profileRow}><Icon name="account-circle" size={48} color="#6EB9F2" /><View style={{ flex: 1 }}><Text style={styles.panelTitle}>Пользователь Manus</Text><Text style={styles.panelHint}>Состояние авторизации и доступ к данным</Text></View><View style={styles.onlineBadge}><View style={styles.onlineDot} /><Text style={styles.onlineText}>ОНЛАЙН</Text></View></View></View><Pressable onPress={() => Alert.alert("Авторизация", "Вход и синхронизация выполняются через Manus OAuth.")} style={styles.secondaryDashboardButton}><Icon name="vpn-key" size={21} color="#6EB9F2" /><Text style={styles.secondaryDashboardButtonText}>Проверить авторизацию Manus</Text></Pressable></ScrollView>{renderMenu()}{renderBottomNav()}
+    </ScreenContainer>
+  );
+
+  if (!selectedCase) return <ScreenContainer style={styles.dashboardRoot} containerClassName="bg-background" edges={["top", "left", "right"]}><View style={[styles.header, { borderBottomColor: colors.border }]}><View><Text style={[styles.eyebrow, { color: colors.primary }]}>НАДЁЖКИН / FIELD MODE</Text><Text style={[styles.title, { color: colors.foreground }]}>Расследования отказов</Text></View></View><View style={styles.emptyState}><Icon name="folder-open" size={42} color={colors.muted} /><Text style={[styles.emptyStateTitle, { color: colors.foreground }]}>Расследований пока нет</Text><Text style={[styles.emptyStateText, { color: colors.muted }]}>Создайте новое расследование, чтобы собрать материалы и запустить RCA-анализ.</Text><Pressable onPress={openNewCase} style={[styles.createButton, { backgroundColor: colors.primary, paddingHorizontal: 20 }]}><Icon name="add" size={20} color="#FFFFFF" /><Text style={styles.createButtonText}>Новое расследование</Text></Pressable></View></ScreenContainer>;
 
   return (
-    <ScreenContainer containerClassName="bg-background" edges={["top", "left", "right"]}>
+    <ScreenContainer style={styles.dashboardRoot} containerClassName="bg-background" edges={["top", "left", "right"]}>
+      {renderTopBar()}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <View>
           <Text style={[styles.eyebrow, { color: colors.primary }]}>НАДЁЖКИН / FIELD MODE</Text>
@@ -554,6 +649,7 @@ export default function HomeScreen() {
 
         {selectedCase.result ? <RcaSummary result={selectedCase.result} colors={colors} onExport={() => exportRcaReport(selectedCase)} isExporting={isExporting} onHistoryChange={(history) => updateCase({ ...selectedCase, chatHistory: history })} chatContext={{ caseTitle: selectedCase.title, equipmentType: selectedCase.equipmentType, assetTag: selectedCase.assetTag, location: selectedCase.location, narrative: selectedCase.narrative, result: selectedCase.result, evidence: selectedCase.evidence.map((entry) => ({ kind: entry.kind, name: entry.name, note: entry.note })), history: selectedCase.chatHistory ?? [] }} /> : <View style={[styles.emptyRca, { backgroundColor: "#FFF8F3", borderColor: "#F6D6C8" }]}><View style={styles.emptyRcaIcon}><Icon name="auto-awesome" size={24} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.emptyRcaTitle, { color: colors.foreground }]}>RCA-вывод ещё не сформирован</Text><Text style={[styles.emptyRcaText, { color: colors.muted }]}>Добавьте факты, фотографии и видео. AI соберёт цепочку событий, разделит причины и покажет, чего не хватает для уверенного вывода.</Text></View></View>}
       </ScrollView>
+      {renderBottomNav()}
 
       <Modal visible={showNewCase} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowNewCase(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={[styles.modal, { backgroundColor: colors.background }]}>
@@ -609,7 +705,73 @@ function RcaSummary({ result, colors, onExport, isExporting, chatContext, onHist
   </View>;
 }
 
+function DashboardMetric({ value, label, color }: { value: number; label: string; color: string }) {
+  return <View style={styles.dashboardMetric}><Text style={[styles.dashboardMetricValue, { color }]}>{value}</Text><Text style={styles.dashboardMetricLabel}>{label}</Text></View>;
+}
+
+function StatusRow({ label, count, color, total }: { label: string; count: number; color: string; total: number }) {
+  const progress = Math.min(100, Math.max(count === 0 ? 0 : 8, Math.round((count / total) * 100)));
+  return <View style={styles.statusRow}><View style={styles.statusLabelRow}><Text style={styles.statusLabel}>{label}</Text><Text style={[styles.statusCount, { color }]}>{count}</Text></View><View style={styles.statusTrack}><View style={[styles.statusFill, { width: `${progress}%`, backgroundColor: color }]} /></View></View>;
+}
+
+function QuickAction({ icon, label, onPress }: { icon: React.ComponentProps<typeof MaterialIcons>["name"]; label: string; onPress: () => void }) {
+  return <Pressable onPress={onPress} style={({ pressed }) => [styles.quickAction, pressed && { opacity: 0.72 }]}><Icon name={icon} size={22} color="#6EB9F2" /><Text style={styles.quickActionLabel}>{label}</Text></Pressable>;
+}
+
 const styles = StyleSheet.create({
+  dashboardRoot: { backgroundColor: "#091526" },
+  dashboardTopBar: { minHeight: 72, paddingHorizontal: 18, paddingVertical: 12, flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#0E1B2D", borderBottomWidth: 1, borderBottomColor: "#263B55" },
+  menuButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
+  topBarTitleWrap: { flex: 1 },
+  topBarTitle: { color: "#E6F0F8", fontSize: 17, fontWeight: "800" },
+  topBarSubtitle: { color: "#9FB1C4", fontSize: 10, marginTop: 3 },
+  onlineBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#173F3B", borderRadius: 18, paddingHorizontal: 11, paddingVertical: 8 },
+  onlineDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: "#5ED3B0" },
+  onlineText: { color: "#65D1AE", fontSize: 10, fontWeight: "800" },
+  dashboardContent: { padding: 24, paddingBottom: 120, gap: 24, backgroundColor: "#091526" },
+  dashboardHero: { paddingBottom: 24, borderBottomWidth: 1, borderBottomColor: "#263B55" },
+  dashboardEyebrow: { color: "#6EB9F2", fontSize: 11, fontWeight: "900", letterSpacing: 1.5 },
+  heroTitleRow: { flexDirection: "row", alignItems: "center", marginTop: 13, gap: 12 },
+  dashboardTitle: { color: "#E6F0F8", fontSize: 30, lineHeight: 36, fontWeight: "900", letterSpacing: -0.7 },
+  dashboardSubtitle: { color: "#9FB1C4", fontSize: 14, lineHeight: 20, marginTop: 7 },
+  heroInfoButton: { width: 66, height: 66, borderRadius: 34, backgroundColor: "#142A45", alignItems: "center", justifyContent: "center" },
+  overviewBlock: { gap: 7 },
+  overviewTitle: { color: "#E6F0F8", fontSize: 27, fontWeight: "900", marginTop: 5 },
+  overviewText: { color: "#A9BACB", fontSize: 14, lineHeight: 20 },
+  primaryDashboardButton: { minHeight: 66, borderRadius: 22, backgroundColor: "#6EB9F2", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 14, marginTop: 15 },
+  primaryDashboardButtonText: { color: "#071629", fontSize: 15, fontWeight: "900" },
+  dashboardGrid: { flexDirection: "row", flexWrap: "wrap", gap: 16 },
+  dashboardMetric: { width: "47%", minHeight: 122, padding: 24, borderRadius: 22, backgroundColor: "#172942", borderWidth: 1, borderColor: "#35506D" },
+  dashboardMetricValue: { fontSize: 34, fontWeight: "900", marginBottom: 7 },
+  dashboardMetricLabel: { color: "#B4C2D1", fontSize: 12, lineHeight: 17, fontWeight: "700" },
+  dashboardPanel: { padding: 26, borderRadius: 24, backgroundColor: "#172942", borderWidth: 1, borderColor: "#35506D", gap: 18 },
+  quickPanel: { backgroundColor: "#18252D", borderColor: "#3B544C" },
+  panelTitleRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 14 },
+  panelTitle: { color: "#E6F0F8", fontSize: 18, fontWeight: "900" },
+  panelHint: { color: "#9FB1C4", fontSize: 12, lineHeight: 18, marginTop: 5 },
+  statusRow: { gap: 8 },
+  statusLabelRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  statusLabel: { color: "#B4C2D1", fontSize: 13, fontWeight: "700" },
+  statusCount: { fontSize: 14, fontWeight: "900" },
+  statusTrack: { height: 8, borderRadius: 4, backgroundColor: "#263B47", overflow: "hidden" },
+  statusFill: { height: 8, borderRadius: 4 },
+  quickActionGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  quickAction: { width: "47%", minHeight: 60, padding: 12, borderRadius: 15, backgroundColor: "#172942", flexDirection: "row", alignItems: "center", gap: 9 },
+  quickActionLabel: { flex: 1, color: "#DCE7F0", fontSize: 11, lineHeight: 15, fontWeight: "800" },
+  bottomNav: { minHeight: 76, paddingHorizontal: 8, paddingTop: 10, paddingBottom: 8, flexDirection: "row", justifyContent: "space-around", backgroundColor: "#102441", borderTopWidth: 1, borderTopColor: "#35506D" },
+  bottomNavItem: { flex: 1, alignItems: "center", justifyContent: "center", gap: 4 },
+  bottomNavLabel: { fontSize: 10, fontWeight: "800" },
+  menuPanel: { position: "absolute", top: 72, left: 16, right: 16, zIndex: 20, padding: 16, borderRadius: 18, backgroundColor: "#13243B", borderWidth: 1, borderColor: "#42617D", shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 18, elevation: 12 },
+  menuEyebrow: { color: "#6EB9F2", fontSize: 10, letterSpacing: 1.3, fontWeight: "900", marginBottom: 7 },
+  menuRow: { minHeight: 46, flexDirection: "row", alignItems: "center", gap: 12, borderTopWidth: 1, borderTopColor: "#263B55" },
+  menuRowText: { color: "#E6F0F8", fontSize: 13, fontWeight: "800" },
+  equipmentSummaryRow: { minHeight: 78, padding: 16, borderRadius: 18, backgroundColor: "#172942", borderWidth: 1, borderColor: "#35506D", flexDirection: "row", alignItems: "center", gap: 12 },
+  equipmentIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: "#142A45", alignItems: "center", justifyContent: "center" },
+  equipmentSummaryTitle: { color: "#E6F0F8", fontSize: 14, fontWeight: "900" },
+  equipmentSummaryMeta: { color: "#9FB1C4", fontSize: 11, marginTop: 4 },
+  secondaryDashboardButton: { minHeight: 54, borderRadius: 17, borderWidth: 1, borderColor: "#42617D", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 9 },
+  secondaryDashboardButtonText: { color: "#6EB9F2", fontSize: 13, fontWeight: "800" },
+  profileRow: { flexDirection: "row", alignItems: "center", gap: 13 },
   header: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderBottomWidth: StyleSheet.hairlineWidth },
   eyebrow: { fontSize: 11, fontWeight: "800", letterSpacing: 1.5, marginBottom: 4 },
   title: { fontSize: 25, fontWeight: "800", letterSpacing: -0.5 },
