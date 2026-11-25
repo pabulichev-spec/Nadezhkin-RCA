@@ -5,6 +5,7 @@ export type IsoDate = string;
 export type EquipmentKind = "dynamic" | "static";
 export type EquipmentComponent = { id: DomainId; name: string; type?: string; serialNumber?: string; status?: string };
 export type EquipmentEvent = { id: DomainId; type: string; description: string; occurredAt: IsoDate; source?: string };
+export type EquipmentMeasurement = { id: DomainId; parameter: string; value: number | null; unit: string; measuredAt: IsoDate; comment?: string };
 export type Equipment = {
   id: DomainId;
   legacyPumpId?: DomainId;
@@ -19,7 +20,7 @@ export type Equipment = {
   characteristics: Record<string, string>;
   capabilities: string[];
   components: EquipmentComponent[];
-  measurements: DomainId[];
+  measurements: EquipmentMeasurement[];
   history: EquipmentEvent[];
   createdAt: IsoDate;
   updatedAt: IsoDate;

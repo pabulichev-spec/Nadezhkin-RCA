@@ -43,4 +43,25 @@ describe("universal equipment catalog", () => {
     expect(state.equipment[0]).toMatchObject({ id: "pump-old-1", legacyPumpId: "pump-old-1", groupId: "pumps" });
     expect(state.investigations[0].pumpId).toBe("pump-old-1");
   });
+
+  it("persists component and manual measurement edits in the equipment card", async () => {
+    const repository = new PumpRcaRepository({ adapter: new MemoryStorageAdapter() });
+    const equipment = await repository.createEquipment({
+      assetTag: "P-204",
+      groupId: "pumps",
+      groupLabel: "Насосы",
+      kind: "dynamic",
+      model: "Центробежный насос",
+      characteristics: {},
+      capabilities: ["вибрация"],
+      components: [{ id: "component-1", name: "Торцевое уплотнение", type: "Картриджное", status: "В работе" }],
+      measurements: [{ id: "measurement-1", parameter: "Вибрация", value: 4.2, unit: "мм/с", measuredAt: "2026-11-25T06:00:00.000Z" }],
+      history: [],
+    });
+    const saved = await repository.saveEquipment({ ...equipment, components: [], measurements: [], history: [{ id: "event-1", type: "MEASUREMENT_RECORDED", description: "Вибрация: 4.2 мм/с", occurredAt: "2026-11-25T06:00:00.000Z" }] });
+    expect(saved.components).toHaveLength(0);
+    expect(saved.measurements).toHaveLength(0);
+    expect(saved.history[0].description).toContain("Вибрация");
+    expect((await repository.getState()).pumps.find((item) => item.id === equipment.id)?.equipmentType).toBe("Центробежный насос");
+  });
 });
