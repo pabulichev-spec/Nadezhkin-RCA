@@ -35,7 +35,7 @@ import { getConfidenceBand, isValidCacheableRcaResult, matchesCaseFilters, norma
 import { buildRcaReportHtml } from "@/shared/report";
 import type { RcaChatMessage } from "@/shared/chat";
 import { makeAiCacheKey, RCA_CACHE_PROMPT_VERSION, RCA_CACHE_SCHEMA_VERSION, RCA_CACHE_VALIDATOR_VERSION } from "@/shared/ai";
-import { filterEquipmentTypes, isKnownEquipmentType } from "@/shared/equipment";
+import { EQUIPMENT_GROUPS, getEquipmentGroup } from "@/shared/equipment";
 import { readAiCache, readAiUsage, recordAiUsage, removeAiCache, writeAiCache } from "@/lib/ai-cache";
 import { PumpRcaRepository } from "@/lib/domain-repository";
 import { subscribeDomainChanges } from "@/lib/domain-events";
@@ -53,6 +53,24 @@ import { startOAuthLogin } from "@/constants/oauth";
 
 const STORAGE_KEY = "pumprca.cases.v1";
 const formatDashboardDate = (value: Date) => value.toLocaleDateString("ru-RU", { day: "2-digit", month: "short", year: "numeric" }).toUpperCase();
+
+const CASE_EQUIPMENT_CLASSES = [
+  { id: "pumps", label: "Насосы", icon: "waves" as const, description: "Центробежные, объёмные и специальные насосы", groupIds: ["pumps"] },
+  { id: "drives", label: "Приводы и вращение", icon: "settings" as const, description: "Электродвигатели, редукторы и мешалки", groupIds: ["motors", "gearboxes", "mixers"] },
+  { id: "compressors", label: "Компрессоры и вентиляторы", icon: "air" as const, description: "Оборудование для воздуха и газов", groupIds: ["compressors", "fans"] },
+  { id: "centrifuges", label: "Центрифуги и сепараторы", icon: "sync" as const, description: "Разделение фаз вращением", groupIds: ["centrifuges"] },
+  { id: "static", label: "Статическое оборудование", icon: "business" as const, description: "Колонны, сосуды, резервуары и теплообменники", groupIds: ["columns", "vessels", "tanks", "heat-exchangers"] },
+] as const;
+
+const caseEquipmentModels = (classId: string) => {
+  const groupIds = CASE_EQUIPMENT_CLASSES.find((item) => item.id === classId)?.groupIds ?? ["pumps"];
+  return groupIds.flatMap((groupId) => {
+    const group = getEquipmentGroup(groupId);
+    return group ? group.models.map((model) => ({ model, description: group.description, capabilities: group.capabilities, groupId })) : [];
+  });
+};
+
+const classForEquipmentModel = (model: string) => CASE_EQUIPMENT_CLASSES.find((item) => caseEquipmentModels(item.id).some((entry) => entry.model === model))?.id ?? "pumps";
 
 type EvidenceKind = "photo" | "video" | "text" | "file";
 type Severity = "Критический" | "Высокий" | "Средний";
@@ -359,12 +377,12 @@ export default function HomeScreen() {
   const [showNewCase, setShowNewCase] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState({ title: "", equipmentType: "Центробежный насос", assetTag: "", location: "", narrative: "" });
+  const [selectedEquipmentClass, setSelectedEquipmentClass] = useState("pumps");
   const [draftEvidence, setDraftEvidence] = useState<Evidence[]>([]);
   const [draftTags, setDraftTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const dashboardDate = formatDashboardDate(new Date());
   const [equipmentSearch, setEquipmentSearch] = useState("");
-  const [customEquipment, setCustomEquipment] = useState("");
   const [textEvidence, setTextEvidence] = useState("");
   const [isPreparing, setIsPreparing] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -386,7 +404,11 @@ export default function HomeScreen() {
   const [returnTarget, setReturnTarget] = useState<InvestigationStatus | null>(null);
   const [returnReason, setReturnReason] = useState("");
   const [compactNavOpen, setCompactNavOpen] = useState(false);
-  const filteredEquipmentTypes = useMemo(() => filterEquipmentTypes(equipmentSearch), [equipmentSearch]);
+  const caseModels = useMemo(() => {
+    const query = equipmentSearch.trim().toLocaleLowerCase("ru-RU");
+    return caseEquipmentModels(selectedEquipmentClass).filter((item) => !query || `${item.model} ${item.description} ${item.capabilities.join(" ")}`.toLocaleLowerCase("ru-RU").includes(query));
+  }, [equipmentSearch, selectedEquipmentClass]);
+  const selectedCaseModel = caseEquipmentModels(selectedEquipmentClass).find((item) => item.model === draft.equipmentType);
 
   const refreshDomainState = useCallback(async () => {
     setDomainState(await domainRepository.getState());
@@ -600,8 +622,21 @@ export default function HomeScreen() {
       setDomainInvestigations((current) => ({ ...current, [item.id]: fromState }));
       return fromState;
     }
-    const pump = await domainRepository.createPump({ assetTag: item.assetTag, equipmentType: item.equipmentType, location: item.location, metadata: {} });
-    const created = await domainRepository.createInvestigation({ pumpId: pump.id, title: item.title, narrative: item.narrative, severity: item.severity, tags: item.tags });
+    const equipmentGroup = EQUIPMENT_GROUPS.find((entry) => (entry.models as readonly string[]).includes(item.equipmentType)) ?? EQUIPMENT_GROUPS[0];
+    const equipment = await domainRepository.createEquipment({
+      assetTag: item.assetTag,
+      groupId: equipmentGroup.id,
+      groupLabel: equipmentGroup.label,
+      kind: equipmentGroup.kind,
+      model: item.equipmentType,
+      location: item.location,
+      characteristics: {},
+      capabilities: [...equipmentGroup.capabilities],
+      components: [],
+      measurements: [],
+      history: [],
+    });
+    const created = await domainRepository.createInvestigation({ pumpId: equipment.id, title: item.title, narrative: item.narrative, severity: item.severity, tags: item.tags });
     const investigation = await domainRepository.replaceInvestigation({
       ...created,
       legacyCaseId: item.id,
@@ -734,8 +769,8 @@ export default function HomeScreen() {
   const openNewCase = () => {
     setEditingId(null);
     setDraft({ title: "", equipmentType: "Центробежный насос", assetTag: "", location: "", narrative: "" });
+    setSelectedEquipmentClass("pumps");
     setEquipmentSearch("");
-    setCustomEquipment("");
     setDraftEvidence([]);
     setDraftTags([]);
     setTagInput("");
@@ -746,8 +781,8 @@ export default function HomeScreen() {
   const openEvidenceEditor = (item: PumpCase) => {
     setEditingId(item.id);
     setDraft({ title: item.title, equipmentType: item.equipmentType, assetTag: item.assetTag, location: item.location, narrative: item.narrative });
+    setSelectedEquipmentClass(classForEquipmentModel(item.equipmentType));
     setEquipmentSearch("");
-    setCustomEquipment(isKnownEquipmentType(item.equipmentType) ? "" : item.equipmentType);
     setDraftEvidence(item.evidence);
     setDraftTags(item.tags ?? []);
     setTagInput("");
@@ -779,8 +814,8 @@ export default function HomeScreen() {
     setShowNewCase(false);
     setEditingId(null);
     setDraft({ title: "", equipmentType: "Центробежный насос", assetTag: "", location: "", narrative: "" });
+    setSelectedEquipmentClass("pumps");
     setEquipmentSearch("");
-    setCustomEquipment("");
     setDraftEvidence([]);
     setDraftTags([]);
     setTagInput("");
@@ -1093,7 +1128,31 @@ export default function HomeScreen() {
           <View style={styles.modalHeader}><View><Text style={[styles.modalEyebrow, { color: colors.primary }]}>{editingId ? "ДОПОЛНИТЬ КЕЙС" : "НОВОЕ РАССЛЕДОВАНИЕ"}</Text><Text style={[styles.modalTitle, { color: colors.foreground }]}>{editingId ? "Обновить материалы" : "Собрать кейс"}</Text></View><Pressable onPress={() => setShowNewCase(false)} style={[styles.closeButton, { backgroundColor: colors.surface }]}><Icon name="close" size={21} color={colors.foreground} /></Pressable></View>
           <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
             <Text style={[styles.inputLabel, { color: colors.foreground }]}>Название отказа</Text><TextInput value={draft.title} onChangeText={(value) => setDraft((current) => ({ ...current, title: value }))} placeholder="Например: разрушение торцевого уплотнения" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} />
-            <Text style={[styles.inputLabel, { color: colors.foreground }]}>Тип оборудования</Text><View style={[styles.equipmentPicker, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={[styles.searchBox, { borderColor: colors.border, backgroundColor: colors.background }]}><Icon name="search" size={18} color={colors.muted} /><TextInput value={equipmentSearch} onChangeText={setEquipmentSearch} placeholder="Поиск: например, пор..." placeholderTextColor={colors.muted} style={[styles.searchInput, { color: colors.foreground }]} /></View><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.equipmentChipRow}>{filteredEquipmentTypes.map((type) => <EquipmentChip key={type} label={type} active={draft.equipmentType === type} onPress={() => { setDraft((current) => ({ ...current, equipmentType: type })); setCustomEquipment(""); }} colors={colors} />)}<EquipmentChip label="Другой" active={Boolean(customEquipment) || !isKnownEquipmentType(draft.equipmentType)} onPress={() => setDraft((current) => ({ ...current, equipmentType: customEquipment || "" }))} colors={colors} /></ScrollView>{filteredEquipmentTypes.length === 0 && <Text style={[styles.noEquipmentText, { color: colors.muted }]}>Ничего не найдено. Выберите «Другой» и укажите тип вручную.</Text>}{(Boolean(customEquipment) || !isKnownEquipmentType(draft.equipmentType)) && <TextInput value={customEquipment} onChangeText={(value) => { setCustomEquipment(value); setDraft((current) => ({ ...current, equipmentType: value })); }} placeholder="Введите тип оборудования" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} />}</View>
+            <Text style={[styles.inputLabel, { color: colors.foreground }]}>Группа оборудования</Text>
+            <View style={[styles.caseEquipmentPanel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={[styles.stepLabel, { color: colors.muted }]}>1. Сначала выберите класс оборудования</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.caseClassRow}>
+                {CASE_EQUIPMENT_CLASSES.map((item) => {
+                  const active = selectedEquipmentClass === item.id;
+                  return <Pressable key={item.id} onPress={() => { setSelectedEquipmentClass(item.id); setDraft((current) => ({ ...current, equipmentType: caseEquipmentModels(item.id)[0]?.model ?? current.equipmentType })); setEquipmentSearch(""); }} style={({ pressed }) => [styles.caseClassCard, { backgroundColor: active ? "#153A70" : colors.background, borderColor: active ? colors.primary : colors.border, opacity: pressed ? 0.78 : 1 }]}>
+                    <Icon name={item.icon} size={21} color={active ? colors.primary : colors.muted} />
+                    <Text numberOfLines={2} style={[styles.caseClassTitle, { color: active ? colors.primary : colors.foreground }]}>{item.label}</Text>
+                  </Pressable>;
+                })}
+              </ScrollView>
+              <Text style={[styles.classDescription, { color: colors.muted }]}>{CASE_EQUIPMENT_CLASSES.find((item) => item.id === selectedEquipmentClass)?.description}</Text>
+              <Text style={[styles.stepLabel, { color: colors.muted }]}>2. Выберите конкретную модель или тип</Text>
+              <View style={[styles.searchBox, { borderColor: colors.border, backgroundColor: colors.background }]}><Icon name="search" size={18} color={colors.muted} /><TextInput value={equipmentSearch} onChangeText={setEquipmentSearch} placeholder="Поиск модели, например компрессор" placeholderTextColor={colors.muted} style={[styles.searchInput, { color: colors.foreground }]} /></View>
+              <View style={styles.caseModelList}>
+                {caseModels.slice(0, 40).map((entry) => {
+                  const active = draft.equipmentType === entry.model;
+                  return <Pressable key={`${entry.groupId}-${entry.model}`} onPress={() => setDraft((current) => ({ ...current, equipmentType: entry.model }))} style={({ pressed }) => [styles.caseModelCard, { backgroundColor: active ? "#153A70" : colors.background, borderColor: active ? colors.primary : colors.border, opacity: pressed ? 0.78 : 1 }]}>
+                    <View style={{ flex: 1 }}><Text style={[styles.caseModelTitle, { color: active ? "#8CC2FF" : colors.foreground }]}>{entry.model}</Text><Text style={[styles.caseModelDescription, { color: colors.muted }]}>{entry.description}</Text><View style={styles.capabilityRow}>{entry.capabilities.slice(0, 3).map((capability) => <View key={capability} style={[styles.capabilityPill, { backgroundColor: active ? "#204B86" : colors.surface }]}><Text style={[styles.capabilityText, { color: colors.muted }]}>{capability}</Text></View>)}</View></View>{active && <Icon name="check-circle" size={21} color="#8CC2FF" />}</Pressable>;
+                })}
+              </View>
+              {!caseModels.length && <Text style={[styles.noEquipmentText, { color: colors.muted }]}>Ничего не найдено. Измените поиск или выберите другую группу.</Text>}
+              {selectedCaseModel && <View style={styles.selectedEquipmentNote}><Icon name="check-circle" size={18} color={colors.success} /><Text style={{ color: colors.foreground, fontWeight: "800", flex: 1 }}>Выбрано: {selectedCaseModel.model}</Text></View>}
+            </View>
             <View style={styles.twoInputs}><View style={{ flex: 1 }}><Text style={[styles.inputLabel, { color: colors.foreground }]}>Тег актива</Text><TextInput value={draft.assetTag} onChangeText={(value) => setDraft((current) => ({ ...current, assetTag: value }))} placeholder="P-204" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} /></View><View style={{ flex: 1 }}><Text style={[styles.inputLabel, { color: colors.foreground }]}>Локация</Text><TextInput value={draft.location} onChangeText={(value) => setDraft((current) => ({ ...current, location: value }))} placeholder="Цех 2" placeholderTextColor={colors.muted} style={[styles.input, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} /></View></View>
             <Text style={[styles.inputLabel, { color: colors.foreground }]}>Что произошло?</Text><TextInput value={draft.narrative} onChangeText={(value) => setDraft((current) => ({ ...current, narrative: value }))} placeholder="Опишите события, симптомы и действия оператора…" placeholderTextColor={colors.muted} multiline numberOfLines={5} textAlignVertical="top" style={[styles.input, styles.textarea, { backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} />
             <Text style={[styles.inputLabel, { color: colors.foreground }]}>Теги кейса</Text><View style={styles.textEvidenceRow}><TextInput value={tagInput} onChangeText={setTagInput} onSubmitEditing={addDraftTag} placeholder="например: вибрация" placeholderTextColor={colors.muted} style={[styles.input, { flex: 1, backgroundColor: colors.surface, borderColor: colors.border, color: colors.foreground }]} returnKeyType="done" /><Pressable onPress={addDraftTag} style={({ pressed }) => [styles.sendButton, { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 }]}><Icon name="add" size={20} color="#FFFFFF" /></Pressable></View>
@@ -1340,6 +1399,20 @@ const styles = StyleSheet.create({
   equipmentPicker: { borderWidth: 1, borderRadius: 15, padding: 10, gap: 9 },
   equipmentChipRow: { gap: 8, paddingRight: 4 },
   noEquipmentText: { fontSize: 11, lineHeight: 16, paddingHorizontal: 3 },
+  caseEquipmentPanel: { borderWidth: 1, borderRadius: 15, padding: 12, gap: 9 },
+  stepLabel: { fontSize: 11, fontWeight: "800", marginTop: 1 },
+  caseClassRow: { gap: 8, paddingRight: 4 },
+  caseClassCard: { width: 148, minHeight: 74, borderWidth: 1, borderRadius: 13, padding: 11, justifyContent: "space-between", gap: 6 },
+  caseClassTitle: { fontSize: 11, lineHeight: 14, fontWeight: "800" },
+  classDescription: { fontSize: 11, lineHeight: 16, paddingHorizontal: 2 },
+  caseModelList: { gap: 7 },
+  caseModelCard: { minHeight: 82, borderWidth: 1, borderRadius: 13, padding: 11, flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  caseModelTitle: { fontSize: 14, fontWeight: "800", marginBottom: 4 },
+  caseModelDescription: { fontSize: 11, lineHeight: 15 },
+  capabilityRow: { flexDirection: "row", flexWrap: "wrap", gap: 5, marginTop: 7 },
+  capabilityPill: { borderRadius: 5, paddingHorizontal: 6, paddingVertical: 3 },
+  capabilityText: { fontSize: 9, fontWeight: "700" },
+  selectedEquipmentNote: { flexDirection: "row", alignItems: "center", gap: 7, paddingTop: 3 },
   twoInputs: { flexDirection: "row", gap: 10 },
   tagInputList: { flexDirection: "row", gap: 7, flexWrap: "wrap" },
   formTag: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 4 },
