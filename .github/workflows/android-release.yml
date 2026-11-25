@@ -118,7 +118,7 @@ jobs:
           test -s "$APK"
           "$BUILD_TOOLS/aapt" dump badging "$APK" | tee apk-badging.txt
           grep -F "package: name='com.app.pumprcamobile'" apk-badging.txt
-          grep -F "versionCode='17'" apk-badging.txt
+          grep -F "versionCode='18'" apk-badging.txt
           grep -F "versionName='1.0.6'" apk-badging.txt
           grep -F "application-label:'Надёжкин'" apk-badging.txt
           unzip -l "$APK" | grep -E 'assets/.*(bundle|index)' | head -20
@@ -127,7 +127,7 @@ jobs:
             exit 1
           fi
           BUNDLE="$(unzip -p "$APK" assets/index.android.bundle 2>/dev/null || true)"
-          for marker in compressors centrifuges motors createEquipment MEASUREMENT_RECORDED; do
+          for marker in compressors centrifuges motors createEquipment MEASUREMENT_RECORDED NadezhkinReferenceCaseFlow:v2; do
             if ! printf '%s' "$BUNDLE" | grep -aFq "$marker"; then
               echo "Expected equipment marker not found in embedded bundle: $marker" >&2
               exit 1

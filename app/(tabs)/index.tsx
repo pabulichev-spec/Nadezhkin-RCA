@@ -62,6 +62,10 @@ const CASE_EQUIPMENT_CLASSES = [
   { id: "static", label: "Статическое оборудование", icon: "business" as const, description: "Колонны, сосуды, резервуары и теплообменники", groupIds: ["columns", "vessels", "tanks", "heat-exchangers"] },
 ] as const;
 
+// Stable ASCII marker used by the Android release verifier. It prevents a stale
+// JS bundle from being mistaken for the reference «Собрать кейс» flow.
+const NADEZHKIN_REFERENCE_CASE_FLOW = "NadezhkinReferenceCaseFlow:v2";
+
 const caseEquipmentModels = (classId: string) => {
   const groupIds = CASE_EQUIPMENT_CLASSES.find((item) => item.id === classId)?.groupIds ?? ["pumps"];
   return groupIds.flatMap((groupId) => {
@@ -651,6 +655,37 @@ export default function HomeScreen() {
     return investigation;
   };
 
+  const persistCaseEquipment = async (item: PumpCase) => {
+    const investigation = await ensureDomainInvestigation(item);
+    const state = await domainRepository.getState();
+    const equipment = state.equipment.find((entry) => entry.id === investigation.pumpId);
+    const equipmentGroup = EQUIPMENT_GROUPS.find((entry) => (entry.models as readonly string[]).includes(item.equipmentType)) ?? EQUIPMENT_GROUPS[0];
+    if (!equipment) return investigation;
+    const updated = await domainRepository.saveEquipment({
+      ...equipment,
+      assetTag: item.assetTag,
+      groupId: equipmentGroup.id,
+      groupLabel: equipmentGroup.label,
+      kind: equipmentGroup.kind,
+      model: item.equipmentType,
+      location: item.location,
+      capabilities: [...equipmentGroup.capabilities],
+    });
+    setDomainState((current) => current ? {
+      ...current,
+      equipment: current.equipment.map((entry) => entry.id === updated.id ? updated : entry),
+      pumps: current.pumps.map((entry) => entry.id === updated.id ? {
+        ...entry,
+        assetTag: updated.assetTag,
+        equipmentType: updated.model,
+        location: updated.location,
+        metadata: updated.characteristics,
+        updatedAt: updated.updatedAt,
+      } : entry),
+    } : current);
+    return investigation;
+  };
+
   const refreshWorkflow = async (item: PumpCase) => {
     const investigation = await ensureDomainInvestigation(item);
     const events = await domainRepository.getAuditEvents(investigation.id);
@@ -811,6 +846,9 @@ export default function HomeScreen() {
       setSelectedId(newCase.id);
     }
     try {
+      // Persist the group/model selection in the universal Equipment entity at
+      // save time, not only when the user later opens workflow or RCA.
+      await persistCaseEquipment(newCase);
       await syncServerCase(newCase);
     } catch {
       Alert.alert("Локально сохранено", "Сервер не подтвердил сохранение расследования. Локальная копия сохранена; повторите действие при доступном соединении.");
@@ -1127,7 +1165,7 @@ export default function HomeScreen() {
           {selectedCase.result ? <RcaSummaryBoundary colors={colors} onReset={() => updateCase({ ...selectedCase, result: undefined, status: "В работе", updatedAt: formatNow() })}><RcaSummary result={selectedCase.result} colors={colors} onExport={() => exportRcaReport(selectedCase)} isExporting={isExporting} /></RcaSummaryBoundary> : <View style={[styles.emptyRca, { backgroundColor: "#242424", borderColor: "#3A3A3A" }]}><View style={styles.emptyRcaIcon}><Icon name="auto-awesome" size={24} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.emptyRcaTitle, { color: colors.foreground }]}>Вывод анализа ещё не сформирован</Text><Text style={[styles.emptyRcaText, { color: colors.muted }]}>Добавьте факты, фотографии и видео. Затем сервер выполнит проверяемый анализ по бесплатному маршруту.</Text></View></View>}
       </ScrollView>
 
-      <Modal visible={showNewCase} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowNewCase(false)}>
+      <Modal visible={showNewCase} animationType="slide" presentationStyle="pageSheet" testID={NADEZHKIN_REFERENCE_CASE_FLOW} onRequestClose={() => setShowNewCase(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={[styles.modal, { backgroundColor: colors.background }]}>
           <View style={styles.modalHeader}><View><Text style={[styles.modalEyebrow, { color: colors.primary }]}>{editingId ? "ДОПОЛНИТЬ КЕЙС" : "НОВОЕ РАССЛЕДОВАНИЕ"}</Text><Text style={[styles.modalTitle, { color: colors.foreground }]}>{editingId ? "Обновить материалы" : "Собрать кейс"}</Text></View><Pressable onPress={() => setShowNewCase(false)} style={[styles.closeButton, { backgroundColor: colors.surface }]}><Icon name="close" size={21} color={colors.foreground} /></Pressable></View>
           <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
