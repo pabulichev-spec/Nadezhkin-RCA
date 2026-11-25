@@ -208,7 +208,7 @@ export const appRouter = router({
           if (photos.length > 10) ctx.addIssue({ code: "custom", message: "A maximum of 10 photos can be analyzed in one RCA run." });
           const totalPhotoBytes = photos.reduce((total, item) => total + (item.imageData?.length ?? 0), 0);
           if (totalPhotoBytes > 24_000_000) ctx.addIssue({ code: "custom", message: "Photos exceed the combined 24 MB analysis limit." });
-          if (videoFrames.length > 20) ctx.addIssue({ code: "custom", message: "A maximum of 20 extracted video frames is allowed." });
+          if (videoFrames.length > 8) ctx.addIssue({ code: "custom", message: "A maximum of 8 extracted video frames is allowed." });
           if (videoFrames.some((item) => !item.imageData || item.timestampMs === undefined)) {
             ctx.addIssue({ code: "custom", message: "Every video frame must include image data and a timestamp." });
           }

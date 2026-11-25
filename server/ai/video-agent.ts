@@ -109,8 +109,8 @@ export async function runVideoAnalysis(
   frames: VideoFrameInput[],
   provider: (request: AiRequest) => Promise<AiResponse> = callFreeProvider,
 ): Promise<AiResponse> {
-  if (!frames.length || frames.length > 20) {
-    throw new AiGatewayError("INVALID_AI_RESPONSE", "Video analysis requires between 1 and 20 extracted frames.");
+  if (!frames.length || frames.length > 8) {
+    throw new AiGatewayError("INVALID_AI_RESPONSE", "Video analysis requires between 1 and 8 extracted frames.");
   }
   for (const frame of frames) {
     if (!Number.isInteger(frame.timestampMs) || frame.timestampMs < 0 || frame.imageData.length > 7_000_000 || !/^data:image\/(jpeg|png|webp);base64,/i.test(frame.imageData)) {
@@ -125,7 +125,9 @@ export async function runVideoAnalysis(
   ];
   for (const frame of [...frames].sort((a, b) => a.timestampMs - b.timestampMs)) {
     content.push({ type: "text", text: `Кадр ${frame.timestampMs} мс${frame.note ? `. Примечание: ${frame.note}` : ""}` });
-    content.push({ type: "image_url", image_url: { url: frame.imageData, detail: "auto" } });
+    // Low detail is intentional: the client already downsizes frames and the
+    // mobile path must remain reliable on long videos and constrained networks.
+    content.push({ type: "image_url", image_url: { url: frame.imageData, detail: "low" } });
   }
   const response = await provider({
     task: "VIDEO_ANALYSIS",

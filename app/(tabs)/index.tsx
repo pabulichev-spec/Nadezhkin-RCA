@@ -190,9 +190,13 @@ const demoCases: PumpCase[] = [
 ];
 
 const makeId = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-const MAX_IMAGE_DIMENSION = 1024;
-const MAX_VIDEO_FRAMES = 20;
-const MAX_TOTAL_VIDEO_FRAMES = 20;
+// Keep native Android RCA requests below common mobile proxy/body/time limits.
+// The Video Agent still receives a chronological representative sequence; the
+// original video remains attached as evidence metadata and is never sent as a
+// raw base64 payload to the AI gateway.
+const MAX_IMAGE_DIMENSION = 768;
+const MAX_VIDEO_FRAMES = 8;
+const MAX_TOTAL_VIDEO_FRAMES = 8;
 
 async function makeMediaHash(asset: { uri: string; fileSize?: number; duration?: number; width?: number; height?: number }) {
   try {
@@ -260,7 +264,7 @@ async function compressMediaFrame(uri: string, width?: number, height?: number) 
   const actions = maxSide > MAX_IMAGE_DIMENSION
     ? [{ resize: width && height && width >= height ? { width: MAX_IMAGE_DIMENSION } : { height: MAX_IMAGE_DIMENSION } }]
     : [];
-  const result = await ImageManipulator.manipulateAsync(uri, actions, { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG });
+  const result = await ImageManipulator.manipulateAsync(uri, actions, { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG });
   return toDataUrl(result.uri, "image/jpeg");
 }
 
