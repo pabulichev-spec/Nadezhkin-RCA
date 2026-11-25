@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { emptyDomainState } from "../shared/domain/types";
-import { getEquipmentMetrics, getEquipmentStatus } from "../shared/equipment-metrics";
+import { getEquipmentMetrics, getEquipmentStatus, getStatusForEquipment } from "../shared/equipment-metrics";
 
 describe("equipment metrics", () => {
   it("uses the same pump and investigation state for all equipment counters", () => {
@@ -19,5 +19,11 @@ describe("equipment metrics", () => {
     expect(getEquipmentStatus(state.pumps[0], state)).toBe("Требует внимания");
     expect(getEquipmentStatus(state.pumps[1], state)).toBe("Готово к эксплуатации");
     expect(getEquipmentMetrics(state)).toEqual({ total: 3, active: 0, attention: 1, ready: 2 });
+  });
+
+  it("does not crash for universal Equipment without a legacy Pump", () => {
+    const state = emptyDomainState();
+    expect(getStatusForEquipment("compressor-1", state)).toBe("Готово к эксплуатации");
+    expect(getStatusForEquipment("missing-equipment", state)).toBe("Готово к эксплуатации");
   });
 });

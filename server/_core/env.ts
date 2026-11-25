@@ -2,7 +2,11 @@ const isProduction = process.env.NODE_ENV === "production";
 
 export const ENV = {
   appId: process.env.VITE_APP_ID ?? "",
-  cookieSecret: process.env.JWT_SECRET ?? "",
+  // Prefer the platform-owned slot. The project-scoped slot is used only
+  // when the built-in variable cannot be edited from project settings.
+  cookieSecret: (process.env.JWT_SECRET && process.env.JWT_SECRET.length >= 32)
+    ? process.env.JWT_SECRET
+    : process.env.PUMPRCA_JWT_SECRET || process.env.JWT_SECRET || "",
   databaseUrl: process.env.DATABASE_URL ?? "",
   oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",

@@ -9,7 +9,7 @@ import { PumpRcaRepository } from "@/lib/domain-repository";
 import { subscribeDomainChanges } from "@/lib/domain-events";
 import type { DomainState, Equipment, EquipmentComponent, EquipmentMeasurement, Investigation } from "@/shared/domain/types";
 import { EQUIPMENT_GROUPS, filterEquipmentGroups, getEquipmentGroup } from "@/shared/equipment";
-import { getEquipmentStatus } from "@/shared/equipment-metrics";
+import { getEquipmentStatus, getStatusForEquipment } from "@/shared/equipment-metrics";
 
 const Icon = MaterialIcons;
 type PumpFilter = "В работе" | "Требует внимания" | "Готово к эксплуатации";
@@ -47,7 +47,10 @@ export default function PumpsScreen() {
   const group = getEquipmentGroup(selectedGroup) ?? EQUIPMENT_GROUPS[0];
   const filtered = equipment.filter((item) => {
     const haystack = `${item.assetTag} ${item.model} ${item.groupLabel} ${item.location ?? ""} ${item.serialNumber ?? ""}`.toLocaleLowerCase("ru-RU");
-    return haystack.includes(query.toLocaleLowerCase("ru-RU")) && (activeFilter === "Все" || getEquipmentStatus(state!.pumps.find((pump) => pump.id === item.id)!, state!) === activeFilter);
+    // Equipment is canonical, while older/local data can temporarily lack a
+    // matching legacy Pump. The helper keeps status filtering null-safe.
+    const status = state ? getStatusForEquipment(item.id, state) : "Готово к эксплуатации";
+    return haystack.includes(query.toLocaleLowerCase("ru-RU")) && (activeFilter === "Все" || status === activeFilter);
   });
 
   const setGroup = (groupId: string) => {
