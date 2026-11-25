@@ -1,7 +1,29 @@
-export const DOMAIN_SCHEMA_VERSION = 3 as const;
+export const DOMAIN_SCHEMA_VERSION = 4 as const;
 export const DOMAIN_STORAGE_KEY = "pumprca.domain.v2";
 export type DomainId = string;
 export type IsoDate = string;
+export type EquipmentKind = "dynamic" | "static";
+export type EquipmentComponent = { id: DomainId; name: string; type?: string; serialNumber?: string; status?: string };
+export type EquipmentEvent = { id: DomainId; type: string; description: string; occurredAt: IsoDate; source?: string };
+export type Equipment = {
+  id: DomainId;
+  legacyPumpId?: DomainId;
+  assetTag: string;
+  groupId: string;
+  groupLabel: string;
+  kind: EquipmentKind;
+  model: string;
+  location?: string;
+  manufacturer?: string;
+  serialNumber?: string;
+  characteristics: Record<string, string>;
+  capabilities: string[];
+  components: EquipmentComponent[];
+  measurements: DomainId[];
+  history: EquipmentEvent[];
+  createdAt: IsoDate;
+  updatedAt: IsoDate;
+};
 export type Pump = { id: DomainId; assetTag: string; equipmentType: string; manufacturer?: string; model?: string; serialNumber?: string; location?: string; metadata: Record<string, string>; createdAt: IsoDate; updatedAt: IsoDate };
 export type InvestigationStatus = "DRAFT" | "DATA_COLLECTION" | "ANALYSIS" | "PENDING_REVIEW" | "APPROVAL" | "APPROVED" | "CLOSED";
 export type FailureEvent = { occurredAt?: IsoDate | null; place?: string | null; description?: string | null; operatingMode?: string | null; load?: number | null; flow?: number | null; suctionPressure?: number | null; dischargePressure?: number | null; temperature?: number | null; rpm?: number | null; power?: number | null; current?: number | null; voltage?: number | null; downtimeMinutes?: number | null; consequences?: string | null };
@@ -21,10 +43,10 @@ export type CauseNodeType = "FAILURE" | "SYMPTOM" | "MECHANISM" | "CAUSE" | "ROO
 export type CauseNode = { id: DomainId; investigationId: DomainId; parentId?: DomainId; type: CauseNodeType; title: string; description?: string; sortOrder: number; evidenceIds: DomainId[] };
 export type CorrectiveActionStatus = "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "OVERDUE" | "CANCELLED" | "OPEN" | "DONE" | "VERIFIED";
 export type CorrectiveAction = { id: DomainId; investigationId: DomainId; description: string; reason?: string; owner?: string; dueAt?: IsoDate; cost?: number; kpi?: string; expectedEffect?: string; actualResult?: string; status: CorrectiveActionStatus; causeNodeIds: DomainId[]; measurementIds: DomainId[]; specific?: string; measurable?: string; achievable?: string; relevant?: string; timeBound?: string; priority?: string; effectivenessStatus?: "EFFECTIVE" | "PARTIALLY_EFFECTIVE" | "NOT_EFFECTIVE" | "NOT_VERIFIED" };
-export type RootCause = { statement: string; type: "Technical" | "Operational" | "Maintenance" | "Design" | "Installation" | "Human" | "Organizational" | "External"; evidenceIds: DomainId[]; hypothesisIds: DomainId[]; engineerConclusion?: string; confirmedBy?: string; confirmedAt?: IsoDate };
+export type RootCause = { statement: string; type: "Technical" | "Operational" | "Maintenance" | "Design" | "Installation" | "Human" | "Organizational" | "External"; evidenceIds: DomainId[]; hypothesisIds: DomainId[]; engineerConclusion?: string; confirmedBy?: string; confirmedAt?: string };
 export type FiveWhy = { id: DomainId; level: number; why: string; answer: string; evidenceIds: DomainId[]; comment?: string };
 export type EffectivenessRecord = { id: DomainId; actionId: DomainId; baseline?: number | null; target?: number | null; actual?: number | null; unit?: string; delta?: number | null; conclusion?: string; status: "EFFECTIVE" | "PARTIALLY_EFFECTIVE" | "NOT_EFFECTIVE" | "NOT_VERIFIED"; evidenceIds: DomainId[] };
 export type ReportRecord = { generatedAt: IsoDate; exportedAt?: IsoDate; format: "PDF" | "PUMPRCA"; uri?: string };
 export type AuditEvent = { id: DomainId; investigationId?: DomainId; entityType: string; entityId: DomainId; action: "INVESTIGATION_CREATED" | "STATUS_CHANGED" | "STATUS_RETURNED" | "INVESTIGATION_APPROVED" | "INVESTIGATION_CLOSED" | string; oldValue?: unknown; newValue?: unknown; comment?: string; timestamp: IsoDate; actorId?: string };
-export type DomainState = { schemaVersion: typeof DOMAIN_SCHEMA_VERSION; pumps: Pump[]; investigations: Investigation[]; evidence: Evidence[]; measurements: Measurement[]; hypotheses: Hypothesis[]; tasks: RcaTask[]; causes: CauseNode[]; actions: CorrectiveAction[]; auditLog: AuditEvent[]; symptoms: Symptom[]; consequences: Consequence[]; timeline: TimelineEvent[] };
-export function emptyDomainState(): DomainState { return { schemaVersion: DOMAIN_SCHEMA_VERSION, pumps: [], investigations: [], evidence: [], measurements: [], hypotheses: [], tasks: [], causes: [], actions: [], auditLog: [], symptoms: [], consequences: [], timeline: [] }; }
+export type DomainState = { schemaVersion: typeof DOMAIN_SCHEMA_VERSION; pumps: Pump[]; equipment: Equipment[]; investigations: Investigation[]; evidence: Evidence[]; measurements: Measurement[]; hypotheses: Hypothesis[]; tasks: RcaTask[]; causes: CauseNode[]; actions: CorrectiveAction[]; auditLog: AuditEvent[]; symptoms: Symptom[]; consequences: Consequence[]; timeline: TimelineEvent[] };
+export function emptyDomainState(): DomainState { return { schemaVersion: DOMAIN_SCHEMA_VERSION, pumps: [], equipment: [], investigations: [], evidence: [], measurements: [], hypotheses: [], tasks: [], causes: [], actions: [], auditLog: [], symptoms: [], consequences: [], timeline: [] }; }

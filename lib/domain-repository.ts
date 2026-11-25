@@ -8,6 +8,7 @@ import {
   type CauseNode,
   type CorrectiveAction,
   type DomainState,
+  type Equipment,
   type Evidence,
   type Hypothesis,
   type Investigation,
@@ -60,7 +61,7 @@ export class PumpRcaRepository {
     const rawDomain = await this.adapter.getItem(DOMAIN_STORAGE_KEY);
     const rawLegacy = rawDomain ? null : await this.adapter.getItem(LEGACY_CASES_STORAGE_KEY);
     const state = migrateDomainStorage(parseJson(rawDomain), this.legacyCases ?? parseJson(rawLegacy));
-    if (!rawDomain) await this.save(state);
+    if (!rawDomain || !rawDomain.includes('"equipment"')) await this.save(state);
     return state;
   }
 
@@ -75,8 +76,66 @@ export class PumpRcaRepository {
     const timestamp = now();
     const pump: Pump = { ...input, id: id("pump"), createdAt: timestamp, updatedAt: timestamp };
     state.pumps.push(pump);
+    if (!state.equipment.some((item) => item.id === pump.id)) {
+      state.equipment.push(this.equipmentFromPump(pump));
+    }
     await this.save(state);
     return pump;
+  }
+
+  private equipmentFromPump(pump: Pump): Equipment {
+    return {
+      id: pump.id,
+      legacyPumpId: pump.id,
+      assetTag: pump.assetTag,
+      groupId: "pumps",
+      groupLabel: "Насосы",
+      kind: "dynamic",
+      model: pump.equipmentType,
+      location: pump.location,
+      manufacturer: pump.manufacturer,
+      serialNumber: pump.serialNumber,
+      characteristics: pump.metadata,
+      capabilities: [],
+      components: [],
+      measurements: [],
+      history: [],
+      createdAt: pump.createdAt,
+      updatedAt: pump.updatedAt,
+    };
+  }
+
+  async createEquipment(input: Omit<Equipment, "id" | "createdAt" | "updatedAt">): Promise<Equipment> {
+    const state = await this.load();
+    const timestamp = now();
+    const equipment: Equipment = { ...input, id: id("equipment"), createdAt: timestamp, updatedAt: timestamp };
+    state.equipment.push(equipment);
+    // Keep legacy flows, reports and investigation links working while the universal model rolls out.
+    state.pumps.push({
+      id: equipment.id,
+      assetTag: equipment.assetTag,
+      equipmentType: equipment.model,
+      location: equipment.location,
+      manufacturer: equipment.manufacturer,
+      serialNumber: equipment.serialNumber,
+      model: equipment.model,
+      metadata: equipment.characteristics,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    await this.save(state);
+    return equipment;
+  }
+
+  async saveEquipment(equipment: Equipment) {
+    const state = await this.load();
+    const index = state.equipment.findIndex((item) => item.id === equipment.id);
+    if (index < 0) throw new Error(`Оборудование не найдено: ${equipment.id}`);
+    state.equipment[index] = { ...equipment, updatedAt: now() };
+    const pumpIndex = state.pumps.findIndex((item) => item.id === equipment.id);
+    if (pumpIndex >= 0) state.pumps[pumpIndex] = { ...state.pumps[pumpIndex], assetTag: equipment.assetTag, equipmentType: equipment.model, location: equipment.location, manufacturer: equipment.manufacturer, serialNumber: equipment.serialNumber, metadata: equipment.characteristics, updatedAt: now() };
+    await this.save(state);
+    return state.equipment[index];
   }
 
   async deletePumps(pumpIds: string[]) {
@@ -86,6 +145,7 @@ export class PumpRcaRepository {
     const removed = state.pumps.filter((pump) => ids.has(pump.id));
     const affectedInvestigations = state.investigations.filter((item) => item.pumpId && ids.has(item.pumpId));
     state.pumps = state.pumps.filter((pump) => !ids.has(pump.id));
+    state.equipment = state.equipment.filter((item) => !ids.has(item.id));
     state.investigations = state.investigations.map((item) => ids.has(item.pumpId ?? "")
       ? { ...item, pumpId: undefined, updatedAt: now() }
       : item);

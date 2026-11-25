@@ -58,7 +58,7 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="pumps"
-        options={{ href: null, title: "Насосы" }}
+        options={{ href: null, title: "Оборудование" }}
       />
       <Tabs.Screen name="workspace" options={{ href: null, title: "Рабочая область" }} />
       <Tabs.Screen

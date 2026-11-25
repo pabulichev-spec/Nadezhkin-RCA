@@ -275,7 +275,7 @@ class SDKServer {
           loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
           ...(userInfo.openId === ENV.ownerOpenId
             ? { role: "admin" as const, status: "active" as const }
-            : { status: "pending" as const }),
+            : { role: "user" as const, status: "active" as const }),
           lastSignedIn: signedInAt,
         });
         user = await db.getUserByOpenId(userInfo.openId);

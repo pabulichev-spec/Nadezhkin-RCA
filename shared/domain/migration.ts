@@ -2,6 +2,7 @@ import {
   DOMAIN_SCHEMA_VERSION,
   emptyDomainState,
   type DomainState,
+  type Equipment,
   type Evidence,
   type Investigation,
   type Pump,
@@ -112,11 +113,37 @@ export function normalizeDomainState(raw: unknown): DomainState {
       statusChangedAt: typeof candidate.statusChangedAt === "string" ? candidate.statusChangedAt : dateOrNow(candidate.updatedAt),
     } as Investigation;
   }) : [];
+  const pumps = Array.isArray(source.pumps) ? source.pumps : [];
+  const rawEquipment = Array.isArray(source.equipment) ? source.equipment : [];
+  const equipment: Equipment[] = rawEquipment.map((item) => item as Equipment);
+  for (const pump of pumps) {
+    if (equipment.some((item) => item.id === pump.id)) continue;
+    equipment.push({
+      id: pump.id,
+      legacyPumpId: pump.id,
+      assetTag: pump.assetTag,
+      groupId: "pumps",
+      groupLabel: "Насосы",
+      kind: "dynamic",
+      model: pump.equipmentType,
+      location: pump.location,
+      manufacturer: pump.manufacturer,
+      serialNumber: pump.serialNumber,
+      characteristics: pump.metadata,
+      capabilities: [],
+      components: [],
+      measurements: [],
+      history: [],
+      createdAt: pump.createdAt,
+      updatedAt: pump.updatedAt,
+    });
+  }
   return {
     ...base,
     ...source,
     schemaVersion: DOMAIN_SCHEMA_VERSION,
-    pumps: Array.isArray(source.pumps) ? source.pumps : [],
+    pumps,
+    equipment,
     investigations,
     evidence: Array.isArray(source.evidence) ? source.evidence : [],
     measurements: Array.isArray(source.measurements) ? source.measurements : [],

@@ -33,7 +33,7 @@ async function syncUser(userInfo: {
       ? {}
       : userInfo.openId === ENV.ownerOpenId
         ? { role: "admin" as const, status: "active" as const }
-        : { status: "pending" as const }),
+        : { role: "user" as const, status: "active" as const }),
   });
   const saved = await getUserByOpenId(userInfo.openId);
   return (
@@ -42,7 +42,8 @@ async function syncUser(userInfo: {
       name: userInfo.name,
       email: userInfo.email,
         loginMethod: userInfo.loginMethod ?? null,
-        status: "pending",
+        role: "user",
+        status: "active",
         sessionVersion: 1,
         lastSignedIn,
     }
