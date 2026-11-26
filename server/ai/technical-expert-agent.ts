@@ -140,11 +140,13 @@ function fallbackRequest(
   textMessages: AiRequest["messages"],
   knownEvidenceRefs: string[],
   failedModels: string[],
+  requestedModel?: string,
 ): AiRequest {
+  const excludedModels = failedModels.filter((model) => model !== requestedModel);
   return {
     ...baseRequest,
-    model: undefined,
-    excludeModels: failedModels.length ? failedModels : undefined,
+    model: requestedModel,
+    excludeModels: excludedModels.length ? excludedModels : undefined,
     responseFormat: undefined,
     messages: [
       ...textMessages,
@@ -252,7 +254,11 @@ export async function runTechnicalExpertAnalysis(
     // same zero-cost provider and are both validated before returning.
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const fallbackResponse = await provider(fallbackRequest(baseRequest, textMessages, knownEvidenceRefs, failedModels));
+        const reserveModels = allowlistedModelIds("reserve");
+        const requestedModel = attempt === 1
+          ? [...reserveModels].reverse().find((model) => !failedModels.includes(model))
+          : undefined;
+        const fallbackResponse = await provider(fallbackRequest(baseRequest, textMessages, knownEvidenceRefs, failedModels, requestedModel));
         if (fallbackResponse.model && !failedModels.includes(fallbackResponse.model)) failedModels.push(fallbackResponse.model);
         const normalized = normalizeTechnicalExpertResult(fallbackResponse.content, knownEvidenceRefs);
         return { ...fallbackResponse, content: JSON.stringify(normalized) };

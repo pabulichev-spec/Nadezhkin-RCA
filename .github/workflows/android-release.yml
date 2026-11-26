@@ -119,7 +119,7 @@ jobs:
           test -s "$APK"
           "$BUILD_TOOLS/aapt" dump badging "$APK" | tee apk-badging.txt
           grep -F "package: name='com.app.pumprcamobile'" apk-badging.txt
-          grep -F "versionCode='20'" apk-badging.txt
+          grep -F "versionCode='21'" apk-badging.txt
           grep -F "versionName='1.0.6'" apk-badging.txt
           grep -F "application-label:'Надёжкин'" apk-badging.txt
           unzip -l "$APK" | grep -E 'assets/.*(bundle|index)' | head -20

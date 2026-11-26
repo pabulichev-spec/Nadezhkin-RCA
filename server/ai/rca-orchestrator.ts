@@ -131,6 +131,31 @@ function textOnlyRequest(base: AiRequest): AiRequest {
   };
 }
 
+function technicalExpertUnavailableFinding(knownEvidenceRefs: string[]) {
+  return JSON.stringify({
+    equipmentAssessment: "Technical Expert временно недоступен: бесплатные AI-маршруты не вернули совместимый ответ. Техническая причина не установлена.",
+    technicalFacts: [],
+    failureMechanisms: [],
+    diagnosticChecks: [{
+      check: "Повторить техническую экспертизу после восстановления доступности бесплатного AI-маршрута.",
+      purpose: "Получить инженерную интерпретацию без подмены отсутствующих данных гипотезой.",
+      method: "Повторный запуск RCA после проверки доступности разрешённого zero-cost пула.",
+      priority: "HIGH",
+    }],
+    requiredMeasurements: [{
+      parameter: "Фактические параметры отказа и режим работы оборудования",
+      why: "Technical Expert не смог проверить инженерные данные.",
+      conditions: "Собрать по утверждённой процедуре с безопасной изоляцией энергии.",
+    }],
+    missingTechnicalData: [
+      "Техническая интерпретация AI не получена из-за временной недоступности бесплатного маршрута.",
+      ...(knownEvidenceRefs.length ? [] : ["Нет разрешённых ссылок на исходные доказательства."]),
+    ],
+    safetyPrecautions: ["Не считать гипотезу подтверждённой причиной; не выполнять опасные работы без утверждённой процедуры и изоляции энергии."],
+    confidence: 0,
+  });
+}
+
 async function runAgent(provider: (request: AiRequest) => Promise<AiResponse>, request: AiRequest, stage: "analyst" | "critic" | "composer", correlationId: string) {
   logRcaEvent({ correlationId, stage, outcome: "started" });
   try {
@@ -223,7 +248,21 @@ export async function runRcaOrchestrator(
       };
     } catch (error) {
       logRcaEvent({ correlationId, stage: "technical", outcome: "failed", error });
-      throw new RcaPipelineError("technical", correlationId, error);
+      const cause = error instanceof RcaPipelineError ? error.cause : error;
+      const canContinue = cause instanceof AiGatewayError && [
+        "FREE_QUOTA_EXCEEDED",
+        "MODEL_UNAVAILABLE",
+        "PROVIDER_UNAVAILABLE",
+        "INVALID_AI_RESPONSE",
+      ].includes(cause.code);
+      if (!canContinue) throw new RcaPipelineError("technical", correlationId, error);
+      enrichedBase = {
+        ...enrichedBase,
+        messages: [...enrichedBase.messages, {
+          role: "user",
+          content: `РЕЗУЛЬТАТ TECHNICAL EXPERT (degraded mode):\n${technicalExpertUnavailableFinding(knownEvidenceRefs)}\nНе останавливай RCA: Analyst, Critic и Composer должны продолжить анализ исходных доказательств. Не выдумывай технические факты или причины.`,
+        }],
+      };
     }
   }
 

@@ -70,6 +70,22 @@ describe("multi-agent RCA orchestration", () => {
     expect(requests[3].messages.some((message) => typeof message.content === "string" && message.content.includes("РЕЗУЛЬТАТ TECHNICAL EXPERT"))).toBe(true);
   });
 
+  it("continues RCA in an explicit degraded mode when the free technical pool is unavailable", async () => {
+    const requests: AiRequest[] = [];
+    const provider = async (request: AiRequest) => {
+      requests.push(request);
+      if (request.task === "EQUIPMENT_ANALYSIS") throw new AiGatewayError("PROVIDER_UNAVAILABLE", "free pool unavailable", 503, request.model);
+      if (request.agentRole === "analyst" || request.agentRole === "critic") return response(finding);
+      return response(final);
+    };
+
+    const result = await runRcaOrchestrator(base, ["shift-log"], { enabled: true, provider });
+
+    expect(JSON.parse(result.content).structuredRca.facts).toHaveLength(1);
+    expect(requests).toHaveLength(6);
+    expect(requests[3].messages.some((message) => typeof message.content === "string" && message.content.includes("degraded mode"))).toBe(true);
+  });
+
   it("passes Analyst and Critic outputs to Composer and validates the result", async () => {
     const requests: AiRequest[] = [];
     const provider = async (request: AiRequest) => {
