@@ -94,18 +94,29 @@ async function runFindingAgent(
 ) {
   let currentRequest = request;
   let lastError: unknown;
+  let lastResponseModel: string | undefined;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const response = await runAgent(provider, currentRequest, stage, correlationId);
     try {
+      const response = await runAgent(provider, currentRequest, stage, correlationId);
+      lastResponseModel = response.model;
       return { response, finding: parseFinding(response.content) };
     } catch (error) {
       lastError = error;
       logRcaEvent({ correlationId, stage: "validation", outcome: "failed", error });
+      const cause = error instanceof RcaPipelineError ? error.cause : error;
+      if (error instanceof RcaPipelineError && cause instanceof AiGatewayError && isRecoverableFreeAiError(cause)) {
+        const finding = degradedFinding(stage);
+        logRcaEvent({ correlationId, stage, outcome: "failed", error: cause });
+        return {
+          response: degradedResponse(stage),
+          finding,
+        };
+      }
       if (attempt === 1) break;
       currentRequest = {
         ...currentRequest,
         model: undefined,
-        excludeModels: [...new Set([...(currentRequest.excludeModels ?? []), currentRequest.model, response.model].filter((model): model is string => Boolean(model)))],
+        excludeModels: [...new Set([...(currentRequest.excludeModels ?? []), currentRequest.model, lastResponseModel].filter((model): model is string => Boolean(model)))],
         messages: [
           ...currentRequest.messages,
           { role: "system", content: "Предыдущий ответ был несовместим: верни только корректный JSON строго по указанной схеме, без markdown и пояснений." },
@@ -114,6 +125,56 @@ async function runFindingAgent(
     }
   }
   throw new RcaPipelineError("validation", correlationId, lastError ?? new AiGatewayError("INVALID_AI_RESPONSE", "RCA agent returned an incompatible structured response."));
+}
+
+function isRecoverableFreeAiError(error: unknown): error is AiGatewayError {
+  return error instanceof AiGatewayError && [
+    "FREE_QUOTA_EXCEEDED",
+    "MODEL_UNAVAILABLE",
+    "PROVIDER_UNAVAILABLE",
+    "INVALID_AI_RESPONSE",
+    "OPENROUTER_NOT_CONFIGURED",
+    "REQUEST_BLOCKED_BY_ZERO_COST_POLICY",
+  ].includes(error.code);
+}
+
+function degradedResponse(stage: "analyst" | "critic"): AiResponse {
+  return {
+    content: JSON.stringify(degradedFinding(stage)),
+    model: "local-degraded",
+    provider: "openrouter",
+    usage: { cost: 0 },
+  };
+}
+
+function degradedFinding(stage: "analyst" | "critic"): AgentFinding {
+  return {
+    facts: [],
+    symptoms: [],
+    hypotheses: [],
+    missingData: [`${stage === "analyst" ? "Analyst" : "Critic"} временно недоступен: разрешённые бесплатные AI-маршруты не вернули совместимый ответ.`, "Требуется повторить анализ после восстановления бесплатного AI-маршрута."],
+  };
+}
+
+function degradedRcaResult(): string {
+  return JSON.stringify({
+    executiveSummary: "Предварительный RCA не завершён: бесплатные AI-маршруты временно недоступны.",
+    physicalCause: "Причина не установлена; технические данные требуют проверки инженером.",
+    humanFactor: "Человеческий фактор не установлен: подтверждающие данные отсутствуют.",
+    systemicCause: "Системная причина не установлена: подтверждающие данные отсутствуют.",
+    smartActions: [{
+      priority: "HIGH",
+      specific: "Повторить RCA после восстановления разрешённого бесплатного AI-маршрута и проверить исходные доказательства.",
+      measurable: "Получить валидный RCA-ответ и перечень проверенных evidenceRefs.",
+      achievable: "Выполнить повторный запуск через штатный серверный контур.",
+      relevant: "Не допустить подмены отсутствующего анализа выдуманной причиной.",
+      timeBound: "До принятия решения о ремонте или повторном пуске.",
+    }],
+    confidence: 0,
+    openQuestions: ["Какие факты подтверждаются исходными материалами?", "Какие измерения необходимы для установления причины отказа?"],
+    methodNotes: "Безопасный degraded mode: AI-анализ временно недоступен, поэтому причина не выдумывается и не считается подтверждённой.",
+    structuredRca: { facts: [], symptoms: [], hypotheses: [], missingData: ["Analyst/Critic/Composer не получили совместимый ответ от разрешённых бесплатных AI-маршрутов."] },
+  });
 }
 
 function agentRequest(base: AiRequest, role: FreeAgentRole, system: string, user: string, responseFormat: Record<string, unknown>): AiRequest {
@@ -254,6 +315,8 @@ export async function runRcaOrchestrator(
         "MODEL_UNAVAILABLE",
         "PROVIDER_UNAVAILABLE",
         "INVALID_AI_RESPONSE",
+        "OPENROUTER_NOT_CONFIGURED",
+        "REQUEST_BLOCKED_BY_ZERO_COST_POLICY",
       ].includes(cause.code);
       if (!canContinue) throw new RcaPipelineError("technical", correlationId, error);
       enrichedBase = {
@@ -314,6 +377,15 @@ export async function runRcaOrchestrator(
       if (failedModel && !attemptedComposerModels.includes(failedModel)) attemptedComposerModels.push(failedModel);
       logRcaEvent({ correlationId, stage: "validation", outcome: "failed", error: lastError });
     }
+  }
+  if (isRecoverableFreeAiError(lastError)) {
+    logRcaEvent({ correlationId, stage: "composer", outcome: "failed", error: lastError });
+    return {
+      content: degradedRcaResult(),
+      model: "local-degraded",
+      provider: "openrouter",
+      usage: { cost: 0 },
+    };
   }
   throw new RcaPipelineError("validation", correlationId, lastError ?? new AiGatewayError("INVALID_AI_RESPONSE", "RCA composer did not produce a valid structured result."));
 }

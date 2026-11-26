@@ -312,9 +312,9 @@ describe("multi-agent RCA orchestration", () => {
     expect(requests[3].model).toBeUndefined();
   });
 
-  it.each(["analyst", "critic"] as const)("wraps %s provider errors with a bounded stage", async (stage) => {
+  it.each(["analyst", "critic"] as const)("returns a safe degraded RCA when %s provider is unavailable", async (stage) => {
     let calls = 0;
-    await expect(runRcaOrchestrator(base, ["shift-log"], {
+    const result = await runRcaOrchestrator(base, ["shift-log"], {
       enabled: true, technicalExpertEnabled: false,
       correlationId: "corr-agent-error",
       provider: async () => {
@@ -322,13 +322,15 @@ describe("multi-agent RCA orchestration", () => {
         if (stage === "analyst" || calls === 2) throw new AiGatewayError("FREE_QUOTA_EXCEEDED", "quota", 429, "free/test");
         return response(finding);
       },
-    })).rejects.toMatchObject({ stage, correlationId: "corr-agent-error" });
-    expect(calls).toBe(stage === "analyst" ? 1 : 2);
+    });
+    expect(JSON.parse(result.content)).toMatchObject({ confidence: 0 });
+    expect(JSON.parse(result.content).structuredRca.missingData.length).toBeGreaterThan(0);
+    expect(calls).toBe(4);
   });
 
-  it("bounds invalid Composer JSON to one retry and returns a validation stage", async () => {
+  it("bounds invalid Composer JSON to one retry and returns a safe degraded RCA", async () => {
     const requests: AiRequest[] = [];
-    await expect(runRcaOrchestrator(base, ["shift-log"], {
+    const result = await runRcaOrchestrator(base, ["shift-log"], {
       enabled: true, technicalExpertEnabled: false,
       correlationId: "corr-composer-invalid",
       provider: async (request) => {
@@ -336,7 +338,8 @@ describe("multi-agent RCA orchestration", () => {
         if (requests.length <= 2) return response(finding);
         return response("not-json");
       },
-    })).rejects.toMatchObject({ stage: "validation", correlationId: "corr-composer-invalid" });
+    });
+    expect(JSON.parse(result.content).confidence).toBe(0);
     expect(requests).toHaveLength(4);
   });
 
