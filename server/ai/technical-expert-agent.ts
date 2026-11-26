@@ -135,6 +135,28 @@ function shouldRetryWithoutStructuredOutput(error: unknown): error is AiGatewayE
   ].includes(error.code);
 }
 
+function fallbackRequest(
+  baseRequest: AiRequest,
+  textMessages: AiRequest["messages"],
+  knownEvidenceRefs: string[],
+  failedModels: string[],
+): AiRequest {
+  return {
+    ...baseRequest,
+    model: undefined,
+    excludeModels: failedModels.length ? failedModels : undefined,
+    responseFormat: undefined,
+    messages: [
+      ...textMessages,
+      {
+        role: "system",
+        content: `${TECHNICAL_EXPERT_SYSTEM_PROMPT}\n\nТехническое требование маршрута: этот бесплатный маршрут не использует response_format. Верни ровно один JSON-объект по описанной схеме, без markdown, комментариев и пояснений. Проверь перед отправкой, что все обязательные поля присутствуют, supportingFactIndexes указывают на существующие technicalFacts, а evidenceRefs входят в разрешённый список.`,
+      },
+      { role: "user", content: `Разрешённые evidenceRefs (используй только их): ${JSON.stringify(knownEvidenceRefs)}. Выполни техническую экспертизу и верни только JSON.` },
+    ],
+  };
+}
+
 function normalizeTechnicalExpertResult(content: string, knownEvidenceRefs: string[]): TechnicalExpertResult {
   let parsed: unknown;
   try {
@@ -213,6 +235,7 @@ export async function runTechnicalExpertAnalysis(
     reasoning: { enabled: false },
     maxTokens: 2400,
   };
+  const failedModels: string[] = [];
   try {
     const response = await provider(baseRequest);
     const normalized = normalizeTechnicalExpertResult(response.content, knownEvidenceRefs);
@@ -223,22 +246,22 @@ export async function runTechnicalExpertAnalysis(
     // zero-cost pool, asking for JSON in the prompt and validating it locally.
     // Never retry policy/configuration errors and never remove server validation.
     if (!shouldRetryWithoutStructuredOutput(error)) throw error;
-    const failedModel = error.modelId ?? baseRequest.model;
-    const fallbackResponse = await provider({
-      ...baseRequest,
-      model: undefined,
-      excludeModels: failedModel ? [failedModel] : undefined,
-      responseFormat: undefined,
-      messages: [
-        ...textMessages,
-        {
-          role: "system",
-          content: `${TECHNICAL_EXPERT_SYSTEM_PROMPT}\n\nТехническое требование маршрута: этот бесплатный маршрут не использует response_format. Верни ровно один JSON-объект по описанной схеме, без markdown, комментариев и пояснений.`,
-        },
-        { role: "user", content: `Разрешённые evidenceRefs (используй только их): ${JSON.stringify(knownEvidenceRefs)}. Выполни техническую экспертизу и верни только JSON.` },
-      ],
-    });
-    const normalized = normalizeTechnicalExpertResult(fallbackResponse.content, knownEvidenceRefs);
-    return { ...fallbackResponse, content: JSON.stringify(normalized) };
+    if (error.modelId) failedModels.push(error.modelId);
+    let lastError: unknown = error;
+    // Two bounded text-only attempts are still routed exclusively through the
+    // same zero-cost provider and are both validated before returning.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const fallbackResponse = await provider(fallbackRequest(baseRequest, textMessages, knownEvidenceRefs, failedModels));
+        if (fallbackResponse.model && !failedModels.includes(fallbackResponse.model)) failedModels.push(fallbackResponse.model);
+        const normalized = normalizeTechnicalExpertResult(fallbackResponse.content, knownEvidenceRefs);
+        return { ...fallbackResponse, content: JSON.stringify(normalized) };
+      } catch (fallbackError) {
+        lastError = fallbackError;
+        if (!shouldRetryWithoutStructuredOutput(fallbackError)) throw fallbackError;
+        if (fallbackError.modelId && !failedModels.includes(fallbackError.modelId)) failedModels.push(fallbackError.modelId);
+      }
+    }
+    throw lastError;
   }
 }

@@ -82,6 +82,24 @@ describe("Technical Expert", () => {
     expect(result.usage.cost).toBe(0);
   });
 
+  it("uses one additional bounded text-only attempt after an invalid fallback response", async () => {
+    const requests: AiRequest[] = [];
+    const result = await runTechnicalExpertAnalysis(messages, ["shift-log"], async (request) => {
+      requests.push(request);
+      if (requests.length < 3) return response("not valid technical JSON");
+      return response(JSON.stringify(validResult));
+    });
+
+    expect(requests).toHaveLength(3);
+    expect(requests[0].responseFormat).toBeDefined();
+    expect(requests[1].responseFormat).toBeUndefined();
+    expect(requests[2].responseFormat).toBeUndefined();
+    expect(requests[1].messages.at(-1)?.content).toContain("shift-log");
+    expect(requests[2].excludeModels).toContain(allowlistedModelIds("reserve")[0]);
+    expect(JSON.parse(result.content).confidence).toBe(35);
+    expect(result.usage.cost).toBe(0);
+  });
+
   it("rejects facts that cite an unknown evidence reference", async () => {
     const invalid = structuredClone(validResult);
     invalid.technicalFacts[0].evidenceRefs = ["invented-document.pdf"];
