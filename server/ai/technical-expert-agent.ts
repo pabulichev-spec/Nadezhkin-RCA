@@ -127,6 +127,14 @@ function textOnlyMessages(messages: AiRequest["messages"]): AiRequest["messages"
   });
 }
 
+function shouldRetryWithoutStructuredOutput(error: unknown): error is AiGatewayError {
+  return error instanceof AiGatewayError && [
+    "MODEL_UNAVAILABLE",
+    "PROVIDER_UNAVAILABLE",
+    "INVALID_AI_RESPONSE",
+  ].includes(error.code);
+}
+
 function normalizeTechnicalExpertResult(content: string, knownEvidenceRefs: string[]): TechnicalExpertResult {
   let parsed: unknown;
   try {
@@ -191,19 +199,46 @@ export async function runTechnicalExpertAnalysis(
   knownEvidenceRefs: string[],
   provider: (request: AiRequest) => Promise<AiResponse> = callFreeProvider,
 ): Promise<AiResponse> {
-  const response = await provider({
+  const textMessages = textOnlyMessages(messages);
+  const baseRequest: AiRequest = {
     task: "EQUIPMENT_ANALYSIS",
     agentRole: "reserve",
     model: allowlistedModelIds("reserve")[0],
     messages: [
       { role: "system", content: TECHNICAL_EXPERT_SYSTEM_PROMPT },
-      ...textOnlyMessages(messages),
+      ...textMessages,
       { role: "user", content: `Разрешённые evidenceRefs (используй только их): ${JSON.stringify(knownEvidenceRefs)}. Выполни техническую экспертизу и верни JSON.` },
     ],
     responseFormat: TECHNICAL_EXPERT_RESPONSE_FORMAT,
     reasoning: { enabled: false },
     maxTokens: 2400,
-  });
-  const normalized = normalizeTechnicalExpertResult(response.content, knownEvidenceRefs);
-  return { ...response, content: JSON.stringify(normalized) };
+  };
+  try {
+    const response = await provider(baseRequest);
+    const normalized = normalizeTechnicalExpertResult(response.content, knownEvidenceRefs);
+    return { ...response, content: JSON.stringify(normalized) };
+  } catch (error) {
+    // Some free OpenAI-compatible routes advertise structured_outputs but reject
+    // json_schema at runtime. Retry once through the same explicitly allowlisted
+    // zero-cost pool, asking for JSON in the prompt and validating it locally.
+    // Never retry policy/configuration errors and never remove server validation.
+    if (!shouldRetryWithoutStructuredOutput(error)) throw error;
+    const failedModel = error.modelId ?? baseRequest.model;
+    const fallbackResponse = await provider({
+      ...baseRequest,
+      model: undefined,
+      excludeModels: failedModel ? [failedModel] : undefined,
+      responseFormat: undefined,
+      messages: [
+        ...textMessages,
+        {
+          role: "system",
+          content: `${TECHNICAL_EXPERT_SYSTEM_PROMPT}\n\nТехническое требование маршрута: этот бесплатный маршрут не использует response_format. Верни ровно один JSON-объект по описанной схеме, без markdown, комментариев и пояснений.`,
+        },
+        { role: "user", content: `Разрешённые evidenceRefs (используй только их): ${JSON.stringify(knownEvidenceRefs)}. Выполни техническую экспертизу и верни только JSON.` },
+      ],
+    });
+    const normalized = normalizeTechnicalExpertResult(fallbackResponse.content, knownEvidenceRefs);
+    return { ...fallbackResponse, content: JSON.stringify(normalized) };
+  }
 }

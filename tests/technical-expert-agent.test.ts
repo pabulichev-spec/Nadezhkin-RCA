@@ -63,6 +63,25 @@ describe("Technical Expert", () => {
     expect(result.usage.cost).toBe(0);
   });
 
+  it("retries through the zero-cost pool when a route rejects structured output", async () => {
+    const requests: AiRequest[] = [];
+    const result = await runTechnicalExpertAnalysis(messages, ["shift-log"], async (request) => {
+      requests.push(request);
+      if (requests.length === 1) {
+        throw new AiGatewayError("MODEL_UNAVAILABLE", "structured output is not supported", 400, request.model);
+      }
+      return response(`Ответ модели:\n\n\`\`\`json\n${JSON.stringify(validResult)}\n\`\`\``);
+    });
+
+    expect(requests).toHaveLength(2);
+    expect(requests[0].responseFormat).toBeDefined();
+    expect(requests[1].responseFormat).toBeUndefined();
+    expect(requests[1].model).toBeUndefined();
+    expect(requests[1].excludeModels).toEqual([allowlistedModelIds("reserve")[0]]);
+    expect(JSON.parse(result.content).equipmentAssessment).toContain("данных недостаточно");
+    expect(result.usage.cost).toBe(0);
+  });
+
   it("rejects facts that cite an unknown evidence reference", async () => {
     const invalid = structuredClone(validResult);
     invalid.technicalFacts[0].evidenceRefs = ["invented-document.pdf"];
